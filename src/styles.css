@@ -1,0 +1,325 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-bg: var(--ledger-bg);
+  --color-bg-elevated: var(--ledger-bg-elevated);
+  --color-surface: var(--ledger-surface);
+  --color-surface-hover: var(--ledger-surface-hover);
+  --color-fg: var(--ledger-fg);
+  --color-muted: var(--ledger-muted);
+  --color-subtle: var(--ledger-subtle);
+  --color-border: var(--ledger-border);
+  --color-border-strong: var(--ledger-border-strong);
+  --color-accent: var(--ledger-accent);
+  --color-accent-fg: var(--ledger-accent-fg);
+  --color-backlog: var(--ledger-backlog);
+  --color-planning: var(--ledger-planning);
+  --color-todo: var(--ledger-todo);
+  --color-doing: var(--ledger-doing);
+  --color-review: var(--ledger-review);
+  --color-done: var(--ledger-done);
+  --color-danger: var(--ledger-danger);
+  --color-urgent: var(--ledger-urgent);
+  --color-jira: var(--ledger-jira);
+  --color-jira-fg: var(--ledger-jira-fg);
+  --color-ring: var(--ledger-ring);
+
+  --color-background: var(--ledger-bg);
+  --color-foreground: var(--ledger-fg);
+  --color-card: var(--ledger-surface);
+  --color-card-foreground: var(--ledger-fg);
+  --color-primary: var(--ledger-accent);
+  --color-primary-foreground: var(--ledger-accent-fg);
+  --color-muted-foreground: var(--ledger-muted);
+  --color-destructive: var(--ledger-danger);
+  --color-input: var(--ledger-border-strong);
+  --color-popover: var(--ledger-bg-elevated);
+  --color-popover-foreground: var(--ledger-fg);
+
+  --font-sans: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius: 0.75rem;
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+
+  --shadow-border: var(--ledger-shadow-border);
+  --shadow-card: var(--ledger-shadow-card);
+  --shadow-lift: var(--ledger-shadow-lift);
+
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+:root,
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ledger-bg: #0c0c0d;
+  --ledger-bg-elevated: #141416;
+  --ledger-surface: #1b1b1e;
+  --ledger-surface-hover: #232326;
+  --ledger-fg: #f0eee8;
+  --ledger-muted: #9a9790;
+  --ledger-subtle: #6e6b66;
+  --ledger-border: rgb(240 238 232 / 0.09);
+  --ledger-border-strong: rgb(240 238 232 / 0.16);
+  --ledger-accent: #e6e1d6;
+  --ledger-accent-fg: #121211;
+  --ledger-backlog: #7a7874;
+  --ledger-planning: #9a9388;
+  --ledger-todo: #a8a29e;
+  --ledger-doing: #8a9aab;
+  --ledger-review: #8b8f96;
+  --ledger-done: #7d9a82;
+  --ledger-danger: #c17a72;
+  --ledger-urgent: #c4a574;
+  --ledger-jira: #3d6ea8;
+  --ledger-jira-fg: #f4f7fb;
+  --ledger-ring: #e6e1d6;
+  --ledger-shadow-border: 0 0 0 1px rgb(240 238 232 / 0.08);
+  --ledger-shadow-card:
+    0 0 0 1px rgb(240 238 232 / 0.08),
+    0 8px 24px -16px rgb(0 0 0 / 0.55);
+  --ledger-shadow-lift:
+    0 0 0 1px rgb(240 238 232 / 0.14),
+    0 18px 40px -18px rgb(0 0 0 / 0.7);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --ledger-bg: #f3f0e8;
+  --ledger-bg-elevated: #fbf8f1;
+  --ledger-surface: #ffffff;
+  --ledger-surface-hover: #f4f0e6;
+  --ledger-fg: #1c1b18;
+  --ledger-muted: #5c5850;
+  --ledger-subtle: #8a857c;
+  --ledger-border: rgb(28 27 24 / 0.08);
+  --ledger-border-strong: rgb(28 27 24 / 0.14);
+  --ledger-accent: #1c1b18;
+  --ledger-accent-fg: #f7f4ec;
+  --ledger-backlog: #7a746c;
+  --ledger-planning: #9a8868;
+  --ledger-todo: #6f866c;
+  --ledger-doing: #5d7a96;
+  --ledger-review: #74788a;
+  --ledger-done: #5d8a68;
+  --ledger-danger: #a45a52;
+  --ledger-urgent: #9a7448;
+  --ledger-jira: #2f5f9a;
+  --ledger-jira-fg: #f4f7fb;
+  --ledger-ring: #1c1b18;
+  --ledger-shadow-border: 0 0 0 1px rgb(28 27 24 / 0.08);
+  --ledger-shadow-card:
+    0 0 0 1px rgb(28 27 24 / 0.07),
+    0 10px 24px -16px rgb(40 32 18 / 0.18);
+  --ledger-shadow-lift:
+    0 0 0 1px rgb(28 27 24 / 0.12),
+    0 18px 36px -18px rgb(40 32 18 / 0.22);
+}
+
+html[data-theme="soft"] {
+  color-scheme: light;
+  --ledger-bg: #ece4d4;
+  --ledger-bg-elevated: #f4ede0;
+  --ledger-surface: #faf4e8;
+  --ledger-surface-hover: #efe6d6;
+  --ledger-fg: #3d3930;
+  --ledger-muted: #6a6458;
+  --ledger-subtle: #8d8678;
+  --ledger-border: rgb(70 60 42 / 0.1);
+  --ledger-border-strong: rgb(70 60 42 / 0.16);
+  --ledger-accent: #6a6254;
+  --ledger-accent-fg: #f7f1e4;
+  --ledger-backlog: #a39a8c;
+  --ledger-planning: #b4a584;
+  --ledger-todo: #93a48c;
+  --ledger-doing: #8aa0b0;
+  --ledger-review: #a39aaa;
+  --ledger-done: #8aab92;
+  --ledger-danger: #b07a74;
+  --ledger-urgent: #b4986c;
+  --ledger-jira: #5a7aa4;
+  --ledger-jira-fg: #f4f7fb;
+  --ledger-ring: #6a6254;
+  --ledger-shadow-border: 0 0 0 1px rgb(70 60 42 / 0.08);
+  --ledger-shadow-card:
+    0 0 0 1px rgb(70 60 42 / 0.07),
+    0 8px 20px -14px rgb(70 55 30 / 0.12);
+  --ledger-shadow-lift:
+    0 0 0 1px rgb(70 60 42 / 0.12),
+    0 16px 32px -18px rgb(70 55 30 / 0.16);
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ledger-bg);
+    color: var(--ledger-fg);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--ledger-accent) 30%, transparent);
+    color: var(--ledger-fg);
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  .shadow-border {
+    box-shadow: var(--ledger-shadow-border);
+  }
+
+  .shadow-card {
+    box-shadow: var(--ledger-shadow-card);
+  }
+
+  .shadow-lift {
+    box-shadow: var(--ledger-shadow-lift);
+  }
+
+  .board-scroller {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .board-scroller::-webkit-scrollbar {
+    display: none;
+  }
+
+  .block-link-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: block-link-draw 0.75s var(--ease-smooth-out) forwards;
+  }
+
+  .block-link-flow {
+    stroke-dasharray: 0.07 0.16;
+    animation: block-link-flow 1.8s linear infinite;
+  }
+
+  .block-link-pulse {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: block-link-pulse 1.8s ease-in-out infinite;
+  }
+
+  .notice-unread {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-urgent) 55%, transparent),
+      0 10px 24px -16px rgb(0 0 0 / 0.5);
+    animation: notice-unread 1.8s var(--ease-smooth-out) infinite;
+  }
+
+  .notice-unread-dot {
+    animation: notice-unread-dot 1.4s ease-in-out infinite;
+  }
+
+  .pr-alert-card {
+    background: color-mix(in oklab, var(--ledger-urgent) 22%, var(--ledger-surface));
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-urgent) 55%, transparent),
+      0 10px 28px -16px rgb(0 0 0 / 0.55);
+    animation: pr-alert-pulse 1.8s var(--ease-smooth-out) infinite;
+  }
+}
+
+@keyframes block-link-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes block-link-flow {
+  to {
+    stroke-dashoffset: -0.23;
+  }
+}
+
+@keyframes block-link-pulse {
+  50% {
+    opacity: 0.25;
+    transform: scale(1.35);
+  }
+}
+
+@keyframes notice-unread {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-urgent) 45%, transparent),
+      0 10px 24px -16px rgb(0 0 0 / 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-urgent) 85%, transparent),
+      0 0 22px color-mix(in oklab, var(--ledger-urgent) 22%, transparent);
+  }
+}
+
+@keyframes notice-unread-dot {
+  50% {
+    opacity: 0.35;
+    transform: scale(1.25);
+  }
+}
+
+@keyframes pr-alert-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-urgent) 45%, transparent),
+      0 10px 28px -16px rgb(0 0 0 / 0.55);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-urgent) 85%, transparent),
+      0 0 28px color-mix(in oklab, var(--ledger-urgent) 28%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kanban-card,
+  .kanban-overlay,
+  .pr-alert-card,
+  .notice-unread,
+  .notice-unread-dot,
+  .block-link-draw,
+  .block-link-flow,
+  .block-link-pulse {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .block-link-draw {
+    stroke-dashoffset: 0;
+  }
+
+  .block-link-bead {
+    display: none;
+  }
+}
+}
