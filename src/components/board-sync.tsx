@@ -1,28 +1,83 @@
 import { useEffect, useRef } from "react";
-import { useBoardStore } from "@/lib/kanban";
+import { boardSignature, useBoardStore } from "@/lib/kanban";
 import { compactThemeImages } from "@/lib/markdown-image";
 import { getUnlockToken } from "@/lib/unlock";
 import { loadWorkspace, saveWorkspace } from "@/lib/workspace";
+import { stashWhiteboardImages } from "@/lib/whiteboard-persist";
 
 function token() {
   return getUnlockToken();
 }
 
+function currentBoard() {
+  const { themes, activeThemeId } = useBoardStore.getState();
+  return { themes, activeThemeId };
+}
+
 export function BoardSync() {
   const ready = useRef(false);
   const applying = useRef(false);
-  const saveTimer = useRef<number>(0);
+  const dirty = useRef(false);
+  const flushing = useRef(false);
+  const saveTimer = useRef(0);
   const compacted = useRef(false);
+  const hydrated = useRef(false);
+  const lastApplied = useRef("");
 
   useEffect(() => {
     let cancelled = false;
 
-    async function pull() {
-      if (applying.current) return;
+    async function flush() {
+      if (applying.current || flushing.current) return;
+      if (!token()) return;
+      const latest = currentBoard();
+      window.clearTimeout(saveTimer.current);
+      flushing.current = true;
       try {
-        await Promise.resolve(useBoardStore.persist.rehydrate());
+        const unlock = token();
+        const themes = await stashWhiteboardImages(latest.themes, unlock);
+        await saveWorkspace({
+          data: {
+            themes,
+            activeThemeId: latest.activeThemeId,
+            token: unlock,
+          },
+        });
+        if (!cancelled) {
+          dirty.current = false;
+          lastApplied.current = boardSignature(latest.themes, latest.activeThemeId);
+        }
+      } catch {
+        if (!cancelled) dirty.current = true;
+      } finally {
+        flushing.current = false;
+      }
+    }
+
+    function scheduleSave() {
+      if (!ready.current || applying.current) return;
+      dirty.current = true;
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => {
+        void flush();
+      }, 400);
+    }
+
+    async function pull() {
+      if (applying.current || flushing.current) return;
+      if (dirty.current) {
+        await flush();
+        return;
+      }
+      try {
+        if (!hydrated.current) {
+          await Promise.resolve(useBoardStore.persist.rehydrate());
+          hydrated.current = true;
+          const local = currentBoard();
+          lastApplied.current = boardSignature(local.themes, local.activeThemeId);
+        }
         const remote = await loadWorkspace({ data: { token: token() } });
-        if (cancelled) return;
+        if (cancelled || dirty.current) return;
         applying.current = true;
         if (remote) {
           let themes = remote.themes;
@@ -30,18 +85,23 @@ export function BoardSync() {
             themes = await compactThemeImages(remote.themes);
             compacted.current = true;
           }
-          useBoardStore.getState().replaceBoard(themes, remote.activeThemeId);
+          const signature = boardSignature(themes, remote.activeThemeId);
+          if (signature !== lastApplied.current) {
+            useBoardStore.getState().replaceBoard(themes, remote.activeThemeId);
+            lastApplied.current = signature;
+          }
           if (themes !== remote.themes) {
+            const persisted = await stashWhiteboardImages(themes, token());
             await saveWorkspace({
               data: {
-                themes,
+                themes: persisted,
                 activeThemeId: remote.activeThemeId,
                 token: token(),
               },
             });
           }
         } else {
-          const local = useBoardStore.getState();
+          const local = currentBoard();
           const themes = compacted.current
             ? local.themes
             : await compactThemeImages(local.themes);
@@ -51,11 +111,12 @@ export function BoardSync() {
           }
           await saveWorkspace({
             data: {
-              themes,
+              themes: await stashWhiteboardImages(themes, token()),
               activeThemeId: local.activeThemeId,
               token: token(),
             },
           });
+          lastApplied.current = boardSignature(themes, local.activeThemeId);
         }
       } catch {
         // Keep the local cache if the workspace is unreachable.
@@ -69,24 +130,22 @@ export function BoardSync() {
     const timer = window.setInterval(() => {
       if (ready.current) void pull();
     }, 8000);
+
     const onFocus = () => {
       if (ready.current) void pull();
     };
+    const onHide = () => {
+      if (ready.current && dirty.current) void flush();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") onHide();
+    };
     window.addEventListener("focus", onFocus);
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
 
     const unsub = useBoardStore.subscribe(() => {
-      if (!ready.current || applying.current) return;
-      window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(() => {
-        const latest = useBoardStore.getState();
-        void saveWorkspace({
-          data: {
-            themes: latest.themes,
-            activeThemeId: latest.activeThemeId,
-            token: token(),
-          },
-        });
-      }, 400);
+      scheduleSave();
     });
 
     return () => {
@@ -94,6 +153,8 @@ export function BoardSync() {
       window.clearInterval(timer);
       window.clearTimeout(saveTimer.current);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
       unsub();
     };
   }, []);

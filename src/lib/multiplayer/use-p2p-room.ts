@@ -38,7 +38,22 @@ export function useP2PRoom(options: UseP2PRoomOptions): P2PRoomHandle {
       room,
       selfId,
       name,
-      onPeersChanged: setPeers,
+      onPeersChanged: (list) => {
+        setPeers((current) => {
+          if (
+            current.length === list.length &&
+            current.every(
+              (peer, index) =>
+                peer.id === list[index]?.id &&
+                peer.name === list[index]?.name &&
+                peer.connectionState === list[index]?.connectionState,
+            )
+          ) {
+            return current;
+          }
+          return list;
+        });
+      },
       onMessage: (from, data, channel) => {
         for (const fn of listeners.current) fn(from, data, channel);
       },

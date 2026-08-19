@@ -2,50 +2,41 @@ import { ChevronDown, Megaphone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { selectActiveTheme, useBoardStore } from "@/lib/kanban";
-import { useProfileStore } from "@/lib/profile";
 import { cn } from "@/lib/utils";
 
 export function NoticeBar() {
   const theme = useBoardStore(selectActiveTheme);
   const setThemeNotice = useBoardStore((state) => state.setThemeNotice);
-  const lastRead = useProfileStore((state) => state.noticeRead[theme.id] ?? "");
-  const markNoticeRead = useProfileStore((state) => state.markNoticeRead);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(theme.notice);
 
   useEffect(() => {
     setOpen(false);
-    setDraft(theme.notice);
+    setDraft((current) => (current === theme.notice ? current : theme.notice));
   }, [theme.id]);
 
   useEffect(() => {
-    if (!open) setDraft(theme.notice);
+    if (open) return;
+    setDraft((current) => (current === theme.notice ? current : theme.notice));
   }, [open, theme.notice]);
-
-  useEffect(() => {
-    if (!open) return;
-    markNoticeRead(theme.id, theme.notice);
-  }, [open, theme.id, theme.notice, markNoticeRead]);
 
   useEffect(() => {
     if (!open) return;
     if (draft === theme.notice) return;
     const timer = window.setTimeout(() => {
       setThemeNotice(draft);
-      markNoticeRead(theme.id, draft);
     }, 280);
     return () => window.clearTimeout(timer);
-  }, [open, draft, theme.id, theme.notice, setThemeNotice, markNoticeRead]);
+  }, [open, draft, theme.notice, setThemeNotice]);
 
   const hasText = theme.notice.trim().length > 0;
-  const unread = hasText && !open && lastRead !== theme.notice;
   const preview = theme.notice.trim().split("\n")[0] ?? "";
 
   return (
     <div
       className={cn(
         "overflow-hidden rounded-md bg-surface shadow-border",
-        unread && "notice-unread",
+        hasText && "notice-unread",
       )}
     >
       <button
@@ -57,17 +48,17 @@ export function NoticeBar() {
       >
         <span className="relative grid size-7 shrink-0 place-items-center">
           <Megaphone className="size-4 text-muted" aria-hidden="true" />
-          {unread ? (
+          {hasText ? (
             <span className="notice-unread-dot absolute top-0.5 right-0.5 size-2 rounded-full bg-urgent" />
           ) : null}
         </span>
         <span
           className={cn(
             "shrink-0 text-xs font-medium tracking-wide uppercase",
-            unread ? "text-urgent" : "text-subtle",
+            hasText ? "text-urgent" : "text-subtle",
           )}
         >
-          {unread ? "Unread" : "Notice"}
+          Notice
         </span>
         {!open ? (
           <span className="min-w-0 flex-1 truncate text-sm text-muted">
@@ -89,7 +80,7 @@ export function NoticeBar() {
           <Textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Write a note for this tab. When this is closed, a cue will ask people to read it."
+            placeholder="Write a note for this tab. Any text here keeps the cue visible."
             maxLength={2000}
           />
         </div>

@@ -87,9 +87,6 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
 
     function measure() {
       if (!scroller) return;
-      const overlay = scroller.querySelector<HTMLElement>(".block-links-svg");
-      const previous = overlay?.style.display;
-      if (overlay) overlay.style.display = "none";
       const next: Link[] = [];
       for (const card of Object.values(cards)) {
         if (!card.blocked || !card.blockedBy.length) continue;
@@ -113,7 +110,6 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
         width: Math.max(scroller.scrollWidth, scroller.clientWidth),
         height: Math.max(scroller.scrollHeight, scroller.clientHeight),
       };
-      if (overlay) overlay.style.display = previous ?? "";
       setSize((current) =>
         current.width === nextSize.width && current.height === nextSize.height
           ? current
@@ -124,18 +120,13 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
       setLinks(next);
     }
 
-    const frame = () => {
-      window.requestAnimationFrame(measure);
-    };
-    frame();
-    window.addEventListener("resize", frame);
-    const observer = new ResizeObserver(frame);
-    for (const node of scroller.querySelectorAll("[data-card-id]")) {
-      observer.observe(node);
-    }
+    const frame = window.requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    scroller.addEventListener("scroll", measure, { passive: true });
     return () => {
-      window.removeEventListener("resize", frame);
-      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", measure);
+      scroller.removeEventListener("scroll", measure);
     };
   }, [cards, layoutKey, scroller]);
 

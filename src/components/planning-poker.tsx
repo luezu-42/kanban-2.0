@@ -83,15 +83,16 @@ export function PlanningPoker({
 
   const playerKey = playerIds.join("|");
   useEffect(() => {
+    const ids = playerKey ? playerKey.split("|") : [];
     setState((current) => {
       if (!current || current.phase === "done") return current;
-      const nextVotes = { ...emptyVotes(playerIds) };
-      let changed = Object.keys(current.votes).length !== playerIds.length;
-      for (const id of playerIds) {
+      const nextVotes = { ...emptyVotes(ids) };
+      let changed = Object.keys(current.votes).length !== ids.length;
+      for (const id of ids) {
         if (current.votes[id] != null) nextVotes[id] = current.votes[id];
         if (current.votes[id] !== nextVotes[id]) changed = true;
       }
-      const shouldReveal = everyoneVoted(nextVotes, playerIds);
+      const shouldReveal = everyoneVoted(nextVotes, ids);
       if (!changed && (!shouldReveal || current.phase === "reveal")) return current;
       return {
         ...current,

@@ -86,7 +86,32 @@ export async function compactThemeImages(themes: Theme[]): Promise<Theme[]> {
     }
     next.push(themeChanged ? { ...theme, cards } : theme);
   }
-  return changed ? next : themes;
+  const compacted: Theme[] = [];
+  for (const theme of next) {
+    const board = theme.whiteboard;
+    if (!board?.nodes.length) {
+      compacted.push(theme);
+      continue;
+    }
+    const nodes = [];
+    let boardChanged = false;
+    for (const node of board.nodes) {
+      if (node.type !== "image") {
+        nodes.push(node);
+        continue;
+      }
+      const src = await optimizeDataUrl(node.src);
+      if (src !== node.src) {
+        boardChanged = true;
+        changed = true;
+        nodes.push({ ...node, src });
+      } else {
+        nodes.push(node);
+      }
+    }
+    compacted.push(boardChanged ? { ...theme, whiteboard: { ...board, nodes } } : theme);
+  }
+  return changed ? compacted : themes;
 }
 
 function readAsDataUrl(file: Blob): Promise<string> {

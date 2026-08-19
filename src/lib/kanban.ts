@@ -1,6 +1,13 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import {
+  type WhiteboardDoc,
+  emptyWhiteboard,
+  normalizeWhiteboard,
+  stripWhiteboardDataUrls,
+  whiteboardSignature,
+} from "@/lib/whiteboard";
 
 export const COLUMN_IDS = [
   "backlog",
@@ -98,6 +105,7 @@ export type Theme = BoardSnapshot & {
   id: string;
   name: string;
   notice: string;
+  whiteboard: WhiteboardDoc;
 };
 
 type BoardStore = {
@@ -145,6 +153,7 @@ type BoardStore = {
   applyReviewLeave: (cardId: string, dest: ColumnId | null) => void;
   applyUrgencySort: () => void;
   setThemeNotice: (notice: string) => void;
+  setThemeWhiteboard: (whiteboard: WhiteboardDoc) => void;
   replaceBoard: (themes: Theme[], activeThemeId: string) => void;
   applyCard: (card: Card) => void;
 };
@@ -179,6 +188,12 @@ export function adjacentColumn(id: ColumnId, delta: 1 | -1): ColumnId | null {
   const index = COLUMN_IDS.indexOf(id);
   if (index < 0) return null;
   return COLUMN_IDS[index + delta] ?? null;
+}
+
+export function canEnterColumn(from: ColumnId, to: ColumnId) {
+  if (from === to) return true;
+  if (to === "done") return from === "review";
+  return true;
 }
 
 export function cardLinkKey(kind: CardLinkKind): "jiraUrl" | "prUrl" {
@@ -365,6 +380,7 @@ function makeTheme(name: string, snapshot: BoardSnapshot = emptySnapshot()): The
     id: crypto.randomUUID(),
     name,
     notice: "",
+    whiteboard: emptyWhiteboard(),
     cards: snapshot.cards,
     order: { ...emptyOrder(), ...snapshot.order },
   });
@@ -439,6 +455,36 @@ function seedThemes(): Pick<BoardStore, "themes" | "activeThemeId"> {
   studio.cards[sketch.id] = sketch;
   studio.order.backlog = [sketch.id];
   return { themes: [launch, studio], activeThemeId: launch.id };
+}
+
+export function boardSignature(themes: Theme[], activeThemeId: string) {
+  return JSON.stringify({
+    activeThemeId,
+    themes: themes.map((theme) => ({
+      id: theme.id,
+      name: theme.name,
+      notice: theme.notice,
+      whiteboard: whiteboardSignature(theme.whiteboard ?? emptyWhiteboard()),
+      order: theme.order,
+      cards: Object.values(theme.cards).map((card) => [
+        card.id,
+        card.title,
+        card.description,
+        card.blocked,
+        card.urgent,
+        card.assignee,
+        card.duration,
+        card.prAlert,
+        card.jiraUrl,
+        card.prUrl,
+        card.blockedBy,
+        card.details,
+        Object.keys(card.images)
+          .sort()
+          .map((id) => [id, card.images[id]?.length ?? 0]),
+      ]),
+    })),
+  });
 }
 
 function withActive(state: BoardStore, updater: (theme: Theme) => Theme) {
@@ -529,13 +575,17 @@ function normalizeTheme(raw: Partial<Theme>, fallbackName: string): Theme | null
     id,
     name,
     notice: typeof raw.notice === "string" ? raw.notice : "",
+    whiteboard: normalizeWhiteboard(raw.whiteboard),
     cards,
     order: { ...emptyOrder(), ...(raw.order ?? {}) },
   });
 }
 
 function finalizeTheme(theme: Theme): Theme {
-  return sortThemeByUrgency(theme);
+  return sortThemeByUrgency({
+    ...theme,
+    whiteboard: theme.whiteboard ?? emptyWhiteboard(),
+  });
 }
 
 export function parseBoardPayload(raw: unknown): {
@@ -882,6 +932,7 @@ export const useBoardStore = create<BoardStore>()(
         const overColumn = parseColumnId(overId);
         const to = overColumn ?? findColumnOf(order, overId);
         if (!from || !to) return;
+        if (!canEnterColumn(from, to)) return;
 
         if (from === to) {
           if (from === "review") return;
@@ -917,6 +968,7 @@ export const useBoardStore = create<BoardStore>()(
         const theme = selectActiveTheme(get());
         const from = findColumnOf(theme.order, cardId);
         if (!from || from === columnId) return false;
+        if (!canEnterColumn(from, columnId)) return false;
         set((state) =>
           withActive(state, (current) => {
             const fromIds = current.order[from].filter((id) => id !== cardId);
@@ -1027,25 +1079,27 @@ export const useBoardStore = create<BoardStore>()(
         );
       },
 
+      setThemeWhiteboard: (whiteboard) => {
+        const next = normalizeWhiteboard(whiteboard);
+        set((state) =>
+          withActive(state, (theme) =>
+            whiteboardSignature(theme.whiteboard ?? emptyWhiteboard()) ===
+            whiteboardSignature(next)
+              ? theme
+              : { ...theme, whiteboard: next },
+          ),
+        );
+      },
+
       replaceBoard: (themes, activeThemeId) => {
         const parsed = parseBoardPayload({ themes, activeThemeId });
         if (!parsed) return;
-        set((state) => {
-          if (
-            state.activeThemeId === parsed.activeThemeId &&
-            state.themes === parsed.themes
-          ) {
-            return state;
-          }
-          if (
-            state.activeThemeId === parsed.activeThemeId &&
-            state.themes.length === parsed.themes.length &&
-            state.themes.every((theme, index) => theme === parsed.themes[index])
-          ) {
-            return state;
-          }
-          return parsed;
-        });
+        set((state) =>
+          boardSignature(state.themes, state.activeThemeId) ===
+          boardSignature(parsed.themes, parsed.activeThemeId)
+            ? state
+            : parsed,
+        );
       },
 
       applyCard: (incoming) => {
@@ -1067,7 +1121,10 @@ export const useBoardStore = create<BoardStore>()(
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
       partialize: (state) => ({
-        themes: state.themes,
+        themes: state.themes.map((theme) => ({
+          ...theme,
+          whiteboard: stripWhiteboardDataUrls(theme.whiteboard ?? emptyWhiteboard()),
+        })),
         activeThemeId: state.activeThemeId,
       }),
       merge: (persisted, current) => {

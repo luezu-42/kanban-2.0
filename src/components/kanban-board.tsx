@@ -13,6 +13,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { LayoutGrid, PenLine } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
@@ -25,7 +26,9 @@ import { CardFace } from "@/components/kanban-card";
 import { KanbanColumn } from "@/components/kanban-column";
 import { ThemeTabs, ThemeTabsSkeleton } from "@/components/theme-tabs";
 import { NoticeBar } from "@/components/notice-bar";
+import { WhiteboardCanvas } from "@/components/whiteboard-canvas";
 import { WorkflowStrip } from "@/components/workflow-strip";
+import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +45,7 @@ import {
   type CardLinkKind,
   type ColumnId,
   columnMeta,
+  canEnterColumn,
   findColumnOf,
   listThemeCards,
   parseColumnId,
@@ -74,6 +78,7 @@ export function KanbanBoard() {
   const [pendingPrAlert, setPendingPrAlert] = useState<Card | null>(null);
   const [pendingBlock, setPendingBlock] = useState<Card | null>(null);
   const [boardEl, setBoardEl] = useState<HTMLDivElement | null>(null);
+  const [canvasOpen, setCanvasOpen] = useState(false);
 
   const theme = useBoardStore(selectActiveTheme);
   const addCard = useBoardStore((state) => state.addCard);
@@ -157,10 +162,14 @@ export function KanbanBoard() {
     const overId = event.over?.id ? String(event.over.id) : null;
     const activeId = String(event.active.id);
     const nextColumn = resolveColumn(overId);
+    const from = findColumnOf(order, activeId);
+    if (from && nextColumn && !canEnterColumn(from, nextColumn)) {
+      setOverColumn(from);
+      return;
+    }
     setOverColumn(nextColumn);
 
     if (!overId || !nextColumn) return;
-    const from = findColumnOf(order, activeId);
     if (!from || from === nextColumn) return;
     if (nextColumn === "review") return;
     const card = cards[activeId];
@@ -178,6 +187,8 @@ export function KanbanBoard() {
       const card = current.cards[activeId];
       if (card && from && to === "review" && from !== "review") {
         setPendingReview({ card, from });
+      } else if (from && to && !canEnterColumn(from, to)) {
+        toast.error("Cards reach Done from Review.");
       } else if (from && to && from === to && from !== "review") {
         moveCard(activeId, overId);
       }
@@ -266,6 +277,10 @@ export function KanbanBoard() {
       setPendingReview({ card, from });
       return;
     }
+    if (!canEnterColumn(from, columnId)) {
+      toast.error("Cards reach Done from Review.");
+      return;
+    }
     const moved = sendCardTo(card.id, columnId);
     if (!moved) return;
     if (from === "review") publishLeave(card.id, columnId);
@@ -338,6 +353,20 @@ export function KanbanBoard() {
       <div className="flex flex-col gap-5">
         <ThemeTabs />
         <NoticeBar />
+        <div className="flex items-center">
+          <Button
+            type="button"
+            variant={canvasOpen ? "secondary" : "outline"}
+            onClick={() => setCanvasOpen((open) => !open)}
+          >
+            {canvasOpen ? <LayoutGrid className="size-4" /> : <PenLine className="size-4" />}
+            {canvasOpen ? "Show board" : "Open canvas"}
+          </Button>
+        </div>
+        {canvasOpen ? (
+          <WhiteboardCanvas onClose={() => setCanvasOpen(false)} />
+        ) : (
+          <>
         <WorkflowStrip counts={counts} onSelect={scrollToColumn} />
         <DndContext
           sensors={sensors}
@@ -398,6 +427,8 @@ export function KanbanBoard() {
               )
             : null}
         </DndContext>
+          </>
+        )}
       </div>
 
       <CardFormDialog

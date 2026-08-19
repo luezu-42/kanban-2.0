@@ -7,6 +7,8 @@ import {
   parseBoardPayload,
 } from "@/lib/kanban";
 
+const ASSET_PREFIX = "asset:";
+
 export const WORKSPACE_ID = "ledger";
 
 export type BoardPayload = {
@@ -18,6 +20,73 @@ function toPayload(themes: Theme[], activeThemeId: string): BoardPayload | null 
   return parseBoardPayload({ themes, activeThemeId });
 }
 
+async function upsertAsset(id: string, data: string) {
+  const sql = await getSql();
+  await sql`
+    insert into workspace_assets (id, data, updated_at)
+    values (${id}, ${data}, now())
+    on conflict (id) do update
+      set data = excluded.data, updated_at = now()
+  `;
+}
+
+async function extractWhiteboardAssets(themes: Theme[]): Promise<Theme[]> {
+  let changed = false;
+  const next: Theme[] = [];
+  for (const theme of themes) {
+    let themeChanged = false;
+    const nodes = [];
+    for (const node of theme.whiteboard?.nodes ?? []) {
+      if (node.type !== "image" || !node.src.startsWith("data:image/")) {
+        nodes.push(node);
+        continue;
+      }
+      await upsertAsset(node.id, node.src);
+      themeChanged = true;
+      changed = true;
+      nodes.push({ ...node, src: `${ASSET_PREFIX}${node.id}` });
+    }
+    next.push(
+      themeChanged
+        ? { ...theme, whiteboard: { ...theme.whiteboard, nodes } }
+        : theme,
+    );
+  }
+  return changed ? next : themes;
+}
+
+async function hydrateWhiteboardAssets(themes: Theme[]): Promise<Theme[]> {
+  const ids: string[] = [];
+  for (const theme of themes) {
+    for (const node of theme.whiteboard?.nodes ?? []) {
+      if (node.type === "image" && node.src.startsWith(ASSET_PREFIX)) {
+        ids.push(node.src.slice(ASSET_PREFIX.length));
+      }
+    }
+  }
+  if (!ids.length) return themes;
+  try {
+    const sql = await getSql();
+    const rows = await sql<{ id: string; data: string }>`
+      select id, data from workspace_assets
+    `;
+    const map = new Map(rows.map((row) => [row.id, row.data]));
+    return themes.map((theme) => ({
+      ...theme,
+      whiteboard: {
+        ...theme.whiteboard,
+        nodes: (theme.whiteboard?.nodes ?? []).map((node) => {
+          if (node.type !== "image" || !node.src.startsWith(ASSET_PREFIX)) return node;
+          const data = map.get(node.src.slice(ASSET_PREFIX.length));
+          return data ? { ...node, src: data } : node;
+        }),
+      },
+    }));
+  } catch {
+    return themes;
+  }
+}
+
 async function readPayload(): Promise<BoardPayload | null> {
   const sql = await getSql();
   const rows = await sql<{ payload: string }>`
@@ -26,7 +95,12 @@ async function readPayload(): Promise<BoardPayload | null> {
   const raw = rows[0]?.payload;
   if (!raw) return null;
   try {
-    return parseBoardPayload(JSON.parse(raw));
+    const parsed = parseBoardPayload(JSON.parse(raw));
+    if (!parsed) return null;
+    return {
+      themes: await hydrateWhiteboardAssets(parsed.themes),
+      activeThemeId: parsed.activeThemeId,
+    };
   } catch {
     return null;
   }
@@ -146,10 +220,27 @@ export const saveWorkspace = createServerFn({ method: "POST" })
     if (!data) return { ok: false };
     const { assertUnlock } = await import("@/lib/workspace-gate.server");
     await assertUnlock(data.token);
+    const extracted = await extractWhiteboardAssets(data.themes);
     await writePayload({
-      themes: data.themes,
+      themes: extracted,
       activeThemeId: data.activeThemeId,
     });
+    return { ok: true };
+  });
+
+export const saveWorkspaceAsset = createServerFn({ method: "POST" })
+  .validator((data: { id: string; data: string; token: string }) => ({
+    id: data.id.trim(),
+    data: data.data,
+    token: data.token,
+  }))
+  .handler(async ({ data }) => {
+    const { assertUnlock } = await import("@/lib/workspace-gate.server");
+    await assertUnlock(data.token);
+    if (!data.id || !data.data.startsWith("data:image/")) {
+      return { ok: false };
+    }
+    await upsertAsset(data.id, data.data);
     return { ok: true };
   });
 
