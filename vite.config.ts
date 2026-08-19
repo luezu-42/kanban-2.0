@@ -128,32 +128,41 @@ function authPopupPlugin(): Plugin {
 // opens a second dev-server port, which breaks the single-port preview.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
-export default defineConfig(({ command }) => ({
-  server: {
-    host: "0.0.0.0",
-    port: 8080,
-    strictPort: true,
-  },
-  resolve: { tsconfigPaths: true },
-  plugins: [
-    pgliteBootstrapPlugin(),
-    // Before tanstackStart so /auth/popup never falls through to the SPA.
-    authPopupPlugin(),
-    // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
-    grokPwaPlugin(),
-    tailwindcss(),
-    tanstackStart(),
-    ...(command === "build"
-      ? [
-          nitro({
-            preset: "vercel",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
-            serverDir: "./server",
-          }),
-        ]
-      : []),
-    viteReact(),
-  ],
-}));
+export default defineConfig(({ command }) => {
+  // Deployed app uses shared workspace password, not Grok OAuth.
+  if (command === "build" && process.env.VITE_AUTH_ENABLED !== "true") {
+    process.env.VITE_AUTH_ENABLED = "false";
+  }
+  return {
+    server: {
+      host: "0.0.0.0",
+      port: 8080,
+      strictPort: true,
+    },
+    resolve: { tsconfigPaths: true },
+    ssr: {
+      external: ["@libsql/client"],
+    },
+    plugins: [
+      pgliteBootstrapPlugin(),
+      // Before tanstackStart so /auth/popup never falls through to the SPA.
+      authPopupPlugin(),
+      // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
+      grokPwaPlugin(),
+      tailwindcss(),
+      tanstackStart(),
+      ...(command === "build"
+        ? [
+            nitro({
+              preset: "vercel",
+              // Auto-registers server/middleware/* (the PWA install page +
+              // manifest + head-tag middleware). Nitro v3 defaults serverDir to
+              // false, so removing this silently unwires /?install=1 on deploys.
+              serverDir: "./server",
+            }),
+          ]
+        : []),
+      viteReact(),
+    ],
+  };
+});

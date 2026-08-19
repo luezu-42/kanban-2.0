@@ -24,9 +24,9 @@ async function upsertAsset(id: string, data: string) {
   const sql = await getSql();
   await sql`
     insert into workspace_assets (id, data, updated_at)
-    values (${id}, ${data}, now())
+    values (${id}, ${data}, datetime('now'))
     on conflict (id) do update
-      set data = excluded.data, updated_at = now()
+      set data = excluded.data, updated_at = datetime('now')
   `;
 }
 
@@ -112,7 +112,7 @@ async function writePayload(payload: BoardPayload, previous?: string) {
   if (previous != null) {
     const updated = await sql<{ id: string }>`
       update workspace
-      set payload = ${next}, updated_at = now()
+      set payload = ${next}, updated_at = datetime('now')
       where id = ${WORKSPACE_ID} and payload = ${previous}
       returning id
     `;
@@ -120,9 +120,9 @@ async function writePayload(payload: BoardPayload, previous?: string) {
   }
   await sql`
     insert into workspace (id, payload, updated_at)
-    values (${WORKSPACE_ID}, ${next}, now())
+    values (${WORKSPACE_ID}, ${next}, datetime('now'))
     on conflict (id) do update
-      set payload = excluded.payload, updated_at = now()
+      set payload = excluded.payload, updated_at = datetime('now')
   `;
   return true;
 }
@@ -196,9 +196,9 @@ export const saveProfile = createServerFn({ method: "POST" })
     const sql = await getSql();
     await sql`
       insert into profiles (user_id, name, updated_at)
-      values (${data.deviceId}, ${data.name}, now())
+      values (${data.deviceId}, ${data.name}, datetime('now'))
       on conflict (user_id) do update
-        set name = excluded.name, updated_at = now()
+        set name = excluded.name, updated_at = datetime('now')
     `;
     return { name: data.name };
   });
