@@ -27,6 +27,7 @@ import {
 } from "@/lib/kanban";
 import { cn } from "@/lib/utils";
 import { downloadDoneCsv } from "@/lib/done-csv";
+import { errorMessage } from "@/lib/errors";
 
 export function ThemeTabs() {
   const themes = useBoardStore((state) => state.themes);
@@ -122,12 +123,18 @@ export function ThemeTabs() {
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => {
-                        const count = downloadDoneCsv(theme);
-                        if (!count) {
-                          toast.error("No cards in Done to download.");
-                          return;
+                        try {
+                          const count = downloadDoneCsv(theme);
+                          if (!count) {
+                            toast.error("No cards in Done to download.");
+                            return;
+                          }
+                          toast.success(
+                            `Downloaded ${count} Done ${count === 1 ? "card" : "cards"}.`,
+                          );
+                        } catch (error) {
+                          toast.error(errorMessage(error, "Could not download the CSV."));
                         }
-                        toast.success(`Downloaded ${count} Done ${count === 1 ? "card" : "cards"}.`);
                       }}
                     >
                       <Download className="size-4" />

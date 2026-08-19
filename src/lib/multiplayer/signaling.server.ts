@@ -21,8 +21,8 @@ const signalSchema = z.object({
 const leaveSchema = z.object({ op: z.literal("leave"), room: ID, peer: ID });
 const postSchema = z.discriminatedUnion("op", [signalSchema, leaveSchema]);
 
-const PEER_TTL_SECONDS = 30;
-const SIGNAL_TTL_SECONDS = 60;
+const PEER_TTL_SECONDS = 120;
+const SIGNAL_TTL_SECONDS = 90;
 
 const globalRef = globalThis as typeof globalThis & {
   __rtcSchemaPromise__?: Promise<void>;

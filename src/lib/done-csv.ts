@@ -1,4 +1,5 @@
 import type { Theme } from "@/lib/kanban";
+import { triggerDownload } from "@/lib/errors";
 
 const HEADERS = [
   "title",
@@ -40,13 +41,10 @@ export function doneCardsCsv(theme: Theme) {
 }
 
 export function downloadDoneCsv(theme: Theme) {
+  const count = theme.order.done.filter((id) => theme.cards[id]).length;
+  if (!count) return 0;
   const csv = doneCardsCsv(theme);
   const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName(theme.name);
-  link.click();
-  URL.revokeObjectURL(url);
-  return theme.order.done.filter((id) => theme.cards[id]).length;
+  triggerDownload(blob, fileName(theme.name));
+  return count;
 }

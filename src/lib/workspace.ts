@@ -211,6 +211,23 @@ export const loadWorkspace = createServerFn({ method: "GET" })
     return readPayload();
   });
 
+export async function commitWorkspacePayload(
+  themes: Theme[],
+  activeThemeId: string,
+  token: string,
+) {
+  const { assertUnlock } = await import("@/lib/workspace-gate.server");
+  await assertUnlock(token);
+  const parsed = toPayload(themes, activeThemeId);
+  if (!parsed) return { ok: false as const };
+  const extracted = await extractWhiteboardAssets(parsed.themes);
+  await writePayload({
+    themes: extracted,
+    activeThemeId: parsed.activeThemeId,
+  });
+  return { ok: true as const };
+}
+
 export const saveWorkspace = createServerFn({ method: "POST" })
   .validator((data: BoardPayload & { token: string }) => {
     const payload = toPayload(data.themes, data.activeThemeId);
@@ -218,14 +235,7 @@ export const saveWorkspace = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     if (!data) return { ok: false };
-    const { assertUnlock } = await import("@/lib/workspace-gate.server");
-    await assertUnlock(data.token);
-    const extracted = await extractWhiteboardAssets(data.themes);
-    await writePayload({
-      themes: extracted,
-      activeThemeId: data.activeThemeId,
-    });
-    return { ok: true };
+    return commitWorkspacePayload(data.themes, data.activeThemeId, data.token);
   });
 
 export const saveWorkspaceAsset = createServerFn({ method: "POST" })

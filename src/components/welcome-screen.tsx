@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { errorMessage } from "@/lib/errors";
 import { getUnlockToken, setUnlockToken } from "@/lib/unlock";
 import { useProfileStore } from "@/lib/profile";
 import { saveProfile, unlockWorkspace } from "@/lib/workspace";
@@ -9,11 +10,15 @@ import { saveProfile, unlockWorkspace } from "@/lib/workspace";
 export function WelcomeScreen({
   needName,
   requirePassword,
+  bootError,
   onUnlocked,
+  onRetry,
 }: {
   needName: boolean;
   requirePassword: boolean;
+  bootError?: string;
   onUnlocked: () => void;
+  onRetry?: () => void;
 }) {
   const setName = useProfileStore((state) => state.setName);
   const [name, setNameValue] = useState("");
@@ -23,6 +28,10 @@ export function WelcomeScreen({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (bootError) {
+      onRetry?.();
+      return;
+    }
     const nextName = name.trim();
     if (needName && !nextName) return;
     if (requirePassword && !password) return;
@@ -52,12 +61,23 @@ export function WelcomeScreen({
         setName(saved.name ?? nextName);
       }
       onUnlocked();
-    } catch {
-      setError(requirePassword ? "Could not unlock the workspace." : "Could not save your name.");
+    } catch (caught) {
+      setError(
+        errorMessage(
+          caught,
+          requirePassword ? "Could not unlock the workspace." : "Could not save your name.",
+        ),
+      );
     } finally {
       setBusy(false);
     }
   }
+
+  const title = bootError
+    ? "Could not open the board"
+    : needName
+      ? "Join the board"
+      : "Unlock the board";
 
   return (
     <main className="grid min-h-dvh place-items-center bg-bg px-4 text-fg">
@@ -66,16 +86,24 @@ export function WelcomeScreen({
           Ledger
         </p>
         <h1 className="font-display mt-3 text-4xl leading-none tracking-tight sm:text-5xl">
-          {needName ? "Join the board" : "Unlock the board"}
+          {title}
         </h1>
         <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted">
-          {needName
-            ? requirePassword
-              ? "Enter your name and the shared workspace password."
-              : "Just a name for this device. We will not ask again."
-            : "This workspace is private. Enter the shared password to continue."}
+          {bootError
+            ? bootError
+            : needName
+              ? requirePassword
+                ? "Enter your name and the shared workspace password."
+                : "Just a name for this device. We will not ask again."
+              : "This workspace is private. Enter the shared password to continue."}
         </p>
 
+        {bootError ? (
+          <Button type="submit" className="mt-6 w-full" disabled={busy}>
+            Try again
+          </Button>
+        ) : (
+          <>
         {needName ? (
           <div className="mt-8 grid gap-2">
             <Label htmlFor="profile-name">Name</Label>
@@ -117,6 +145,8 @@ export function WelcomeScreen({
         >
           Continue
         </Button>
+          </>
+        )}
       </form>
     </main>
   );

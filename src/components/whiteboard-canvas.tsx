@@ -21,6 +21,7 @@ import { fileToDataUrl, isImageFile } from "@/lib/markdown-image";
 import { getUnlockToken } from "@/lib/unlock";
 import { saveWorkspace } from "@/lib/workspace";
 import { stashWhiteboardImages } from "@/lib/whiteboard-persist";
+import { errorMessage } from "@/lib/errors";
 import {
   type Box,
   type Point,
@@ -343,8 +344,8 @@ export function WhiteboardCanvas({ onClose }: { onClose: () => void }) {
       });
       if (!result?.ok) throw new Error("save failed");
       toast.success("Canvas saved");
-    } catch {
-      toast.error("Could not save the canvas.");
+    } catch (error) {
+      toast.error(errorMessage(error, "Could not save the canvas."));
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { createContext, createElement, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   type Card,
   type ColumnId,
@@ -19,12 +19,21 @@ type ReviewMessage =
   | { type: "review-snapshot"; cards: Card[] }
   | { type: "pr-alert"; cardId: string; title: string; assignee: string; on: boolean };
 
+type ReviewLiveApi = {
+  publishEnter: (card: Card) => void;
+  publishLeave: (cardId: string, dest: ColumnId | null) => void;
+  publishPrAlert: (card: Card, on: boolean) => void;
+};
+
+const ReviewLiveContext = createContext<ReviewLiveApi | null>(null);
+
 function slimCard(card: Card): Card {
   return {
     ...card,
     details: card.details
       .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, "")
       .slice(0, 4000),
+    images: {},
   };
 }
 
@@ -46,7 +55,14 @@ function samePerson(left: string, right: string) {
   return Boolean(a) && a === b;
 }
 
-export function useReviewLive() {
+function pruneStampMap(map: Map<string, number>, now: number) {
+  if (map.size < 40) return;
+  for (const [key, at] of map) {
+    if (now - at > 30_000) map.delete(key);
+  }
+}
+
+function useReviewLiveSession(): ReviewLiveApi {
   const name = useProfileStore((state) => state.name) ?? "Guest";
   const soundOn = useProfileStore((state) => state.reviewSound);
   const p2p = useP2PRoom({ room: ROOM, name });
@@ -55,6 +71,8 @@ export function useReviewLive() {
   soundOnRef.current = soundOn;
   const nameRef = useRef(name);
   nameRef.current = name;
+  const lastEnterAt = useRef(new Map<string, number>());
+  const lastAlertAt = useRef(new Map<string, number>());
 
   useEffect(() => {
     const unlock = () => unlockReviewChime();
@@ -98,8 +116,9 @@ export function useReviewLive() {
     });
   }, [p2p.onMessage]);
 
+  const peerKey = p2p.peers.map((peer) => peer.id).join("|");
   useEffect(() => {
-    const now = new Set(p2p.peers.map((peer) => peer.id));
+    const now = new Set(peerKey ? peerKey.split("|") : []);
     const added = [...now].filter((id) => !prevPeers.current.has(id));
     const remaining = [p2p.selfId, ...prevPeers.current].sort();
     if (added.length && remaining[0] === p2p.selfId) {
@@ -108,42 +127,56 @@ export function useReviewLive() {
       for (const id of added) p2p.send(payload, id);
     }
     prevPeers.current = now;
-  }, [p2p.peers, p2p.selfId, p2p.send]);
+  }, [peerKey, p2p.selfId, p2p.send]);
 
-  const lastEnterAt = useRef(new Map<string, number>());
+  return useMemo(
+    () => ({
+      publishEnter(card: Card) {
+        const now = Date.now();
+        pruneStampMap(lastEnterAt.current, now);
+        const previous = lastEnterAt.current.get(card.id) ?? 0;
+        if (now - previous < 2500) return;
+        lastEnterAt.current.set(card.id, now);
+        p2p.send({ type: "review-enter", card: slimCard(card) } satisfies ReviewMessage);
+        if (soundOnRef.current) playReviewChime();
+      },
+      publishLeave(cardId: string, dest: ColumnId | null) {
+        p2p.send({ type: "review-leave", cardId, dest } satisfies ReviewMessage);
+      },
+      publishPrAlert(card: Card, on: boolean) {
+        const key = `${card.id}:${on ? "on" : "off"}`;
+        const now = Date.now();
+        pruneStampMap(lastAlertAt.current, now);
+        const previous = lastAlertAt.current.get(key) ?? 0;
+        if (now - previous < 2500) return;
+        lastAlertAt.current.set(key, now);
+        p2p.send({
+          type: "pr-alert",
+          cardId: card.id,
+          title: card.title,
+          assignee: card.assignee,
+          on,
+        } satisfies ReviewMessage);
+        if (on && samePerson(nameRef.current, card.assignee) && soundOnRef.current) {
+          playPrAlertChime();
+        }
+      },
+    }),
+    [p2p.send],
+  );
+}
 
-  function publishEnter(card: Card) {
-    const now = Date.now();
-    const previous = lastEnterAt.current.get(card.id) ?? 0;
-    if (now - previous < 2500) return;
-    lastEnterAt.current.set(card.id, now);
-    p2p.send({ type: "review-enter", card: slimCard(card) } satisfies ReviewMessage);
-    if (soundOnRef.current) playReviewChime();
-  }
+export function ReviewLiveProvider({ children }: { children: ReactNode }) {
+  const value = useReviewLiveSession();
+  return createElement(ReviewLiveContext.Provider, { value }, children);
+}
 
-  function publishLeave(cardId: string, dest: ColumnId | null) {
-    p2p.send({ type: "review-leave", cardId, dest } satisfies ReviewMessage);
-  }
-
-  const lastAlertAt = useRef(new Map<string, number>());
-
-  function publishPrAlert(card: Card, on: boolean) {
-    const key = `${card.id}:${on ? "on" : "off"}`;
-    const now = Date.now();
-    const previous = lastAlertAt.current.get(key) ?? 0;
-    if (now - previous < 2500) return;
-    lastAlertAt.current.set(key, now);
-    p2p.send({
-      type: "pr-alert",
-      cardId: card.id,
-      title: card.title,
-      assignee: card.assignee,
-      on,
-    } satisfies ReviewMessage);
-    if (on && samePerson(nameRef.current, card.assignee) && soundOnRef.current) {
-      playPrAlertChime();
-    }
-  }
-
-  return { publishEnter, publishLeave, publishPrAlert };
+export function useReviewLive(): ReviewLiveApi {
+  const context = useContext(ReviewLiveContext);
+  if (context) return context;
+  return {
+    publishEnter() {},
+    publishLeave() {},
+    publishPrAlert() {},
+  };
 }

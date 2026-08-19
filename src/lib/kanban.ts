@@ -1,6 +1,6 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import {
   type WhiteboardDoc,
   emptyWhiteboard,
@@ -157,6 +157,37 @@ type BoardStore = {
   replaceBoard: (themes: Theme[], activeThemeId: string) => void;
   applyCard: (card: Card) => void;
 };
+
+function debouncedLocalStorage(delay = 900): StateStorage {
+  let timer = 0;
+  let pending: { name: string; value: string } | null = null;
+  const flush = () => {
+    if (!pending || typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(pending.name, pending.value);
+    } catch {
+      // Quota is non-fatal; memory still holds the live board.
+    }
+    pending = null;
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", flush);
+  }
+  return {
+    getItem: (name) => (typeof localStorage === "undefined" ? null : localStorage.getItem(name)),
+    setItem: (name, value) => {
+      pending = { name, value };
+      if (typeof window === "undefined") return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(flush, delay);
+    },
+    removeItem: (name) => {
+      pending = null;
+      if (typeof window !== "undefined") window.clearTimeout(timer);
+      if (typeof localStorage !== "undefined") localStorage.removeItem(name);
+    },
+  };
+}
 
 export const COLUMN_PREFIX = "column:";
 
@@ -478,7 +509,8 @@ export function boardSignature(themes: Theme[], activeThemeId: string) {
         card.jiraUrl,
         card.prUrl,
         card.blockedBy,
-        card.details,
+        card.details.length,
+        card.details.slice(0, 24),
         Object.keys(card.images)
           .sort()
           .map((id) => [id, card.images[id]?.length ?? 0]),
@@ -495,6 +527,24 @@ function withActive(state: BoardStore, updater: (theme: Theme) => Theme) {
   if (next === current) return state;
   return {
     themes: state.themes.map((theme) => (theme.id === current.id ? next : theme)),
+  };
+}
+
+function mergeReviewCard(existing: Card | undefined, incoming: Card): Card {
+  if (!existing) return incoming;
+  return {
+    ...existing,
+    title: incoming.title || existing.title,
+    description: incoming.description || existing.description,
+    assignee: incoming.assignee || existing.assignee,
+    prAlert: incoming.prAlert,
+    blocked: incoming.blocked,
+    urgent: incoming.urgent,
+    jiraUrl: incoming.jiraUrl || existing.jiraUrl,
+    prUrl: incoming.prUrl || existing.prUrl,
+    details:
+      existing.details.length >= incoming.details.length ? existing.details : incoming.details,
+    images: Object.keys(existing.images).length ? existing.images : incoming.images,
   };
 }
 
@@ -995,12 +1045,26 @@ export const useBoardStore = create<BoardStore>()(
         const card = normalizeCard(incoming);
         if (!card) return;
         set((state) => {
-          const queued = state.themes.some((theme) =>
-            theme.order.review.includes(card.id),
-          );
+          let found = false;
+          let changed = false;
           const themes = state.themes.map((theme) => {
+            const existing = theme.cards[card.id];
             const inReview = theme.order.review.includes(card.id);
-            if (!theme.cards[card.id] && !inReview) return theme;
+            if (!existing && !inReview) return theme;
+            found = true;
+            const merged = mergeReviewCard(existing, card);
+            if (
+              inReview &&
+              existing &&
+              existing.prAlert === merged.prAlert &&
+              existing.assignee === merged.assignee &&
+              existing.title === merged.title &&
+              existing.urgent === merged.urgent &&
+              existing.blocked === merged.blocked
+            ) {
+              return theme;
+            }
+            changed = true;
             const order = { ...theme.order };
             for (const columnId of COLUMN_IDS) {
               if (columnId === "review" && inReview) continue;
@@ -1008,11 +1072,16 @@ export const useBoardStore = create<BoardStore>()(
             }
             return {
               ...theme,
-              cards: { ...theme.cards, [card.id]: { ...card } },
-              order,
+              cards: { ...theme.cards, [card.id]: merged },
+              order: inReview
+                ? order
+                : {
+                    ...order,
+                    review: [...order.review.filter((id) => id !== card.id), card.id],
+                  },
             };
           });
-          if (queued) return { themes };
+          if (found) return changed ? { themes } : state;
           const active =
             themes.find((theme) => theme.id === state.activeThemeId) ?? themes[0];
           if (!active) return state;
@@ -1118,7 +1187,7 @@ export const useBoardStore = create<BoardStore>()(
     }),
     {
       name: "ledger-kanban-v1",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => debouncedLocalStorage()),
       skipHydration: true,
       partialize: (state) => ({
         themes: state.themes.map((theme) => ({

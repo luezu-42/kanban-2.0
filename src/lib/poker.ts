@@ -52,7 +52,7 @@ function slimCard(
     title: card.title,
     description: card.description,
     details: slimDetails(card.details),
-    images: card.images,
+    images: {},
     duration: card.duration,
   };
 }

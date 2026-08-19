@@ -10,6 +10,7 @@ import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { applyAppearance } from "@/lib/appearance";
 import { AuthProvider } from "@/lib/auth/provider";
 import { useProfileStore } from "@/lib/profile";
+import { registerLedgerWorker } from "@/lib/sync-queue";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "Ledger";
@@ -79,6 +80,10 @@ function Root() {
 
 function ThemedToaster() {
   const appearance = useProfileStore((state) => state.appearance);
+
+  useEffect(() => {
+    void registerLedgerWorker();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

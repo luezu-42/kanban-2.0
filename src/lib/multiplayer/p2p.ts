@@ -75,8 +75,9 @@ interface PeerSlot {
 }
 
 const FAST_POLL_MS = 400;
-const IDLE_POLL_MS = 2000;
-const PING_INTERVAL_MS = 2000;
+const IDLE_POLL_MS = 2500;
+const HIDDEN_POLL_MS = 10_000;
+const PING_INTERVAL_MS = 4000;
 const STALL_MS = 10_000;
 const MAX_RECOVERY_ATTEMPTS = 3;
 const SIGNAL_RETRY_DELAYS_MS = [250, 750];
@@ -106,6 +107,11 @@ export class P2PRoom {
   private closed = false;
   private everPolled = false;
   private lastPeersFingerprint = "";
+  private readonly onVisibility = () => {
+    if (this.closed) return;
+    if (document.visibilityState === "visible") void this.poll();
+    else this.schedulePoll(HIDDEN_POLL_MS);
+  };
 
   constructor(opts: P2PRoomOptions) {
     this.opts = opts;
@@ -123,19 +129,28 @@ export class P2PRoom {
       // First poll can fail transiently; the scheduled loop below retries.
     }
     if (this.closed) return;
-    this.schedulePoll(this.anyPairConnecting() ? FAST_POLL_MS : IDLE_POLL_MS);
+    this.schedulePoll(this.nextPollDelay());
     this.pingTimer = setInterval(() => {
       this.pingAll();
       this.watchdog();
     }, PING_INTERVAL_MS);
+    document.addEventListener("visibilitychange", this.onVisibility);
   }
 
   close(): void {
     this.closed = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
-    for (const slot of this.peers.values()) slot.pc.close();
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    for (const slot of this.peers.values()) {
+      slot.pc.onicecandidate = null;
+      slot.pc.onconnectionstatechange = null;
+      slot.pc.onnegotiationneeded = null;
+      slot.pc.ondatachannel = null;
+      slot.pc.close();
+    }
     this.peers.clear();
+    this.signalQueues.clear();
     // Leaving the roster is the teardown broadcast: everyone's next poll
     // drops this peer and closes their side of the pair.
     void fetch("/api/rtc", {
@@ -150,7 +165,13 @@ export class P2PRoom {
   broadcast(data: unknown): void {
     const wire = JSON.stringify({ t: "d", d: data });
     for (const slot of this.peers.values()) {
-      if (slot.state?.readyState === "open") slot.state.send(wire);
+      if (slot.state?.readyState === "open") {
+        try {
+          slot.state.send(wire);
+        } catch {
+          // Channel can close between the readyState check and send.
+        }
+      }
     }
   }
 
@@ -159,7 +180,13 @@ export class P2PRoom {
     const wire = JSON.stringify({ t: "d", d: data });
     const targets = peerId ? [this.peers.get(peerId)] : [...this.peers.values()];
     for (const slot of targets) {
-      if (slot?.reliable?.readyState === "open") slot.reliable.send(wire);
+      if (slot?.reliable?.readyState === "open") {
+        try {
+          slot.reliable.send(wire);
+        } catch {
+          // Drop rather than throw into React event handlers.
+        }
+      }
     }
   }
 
@@ -168,6 +195,13 @@ export class P2PRoom {
   }
 
   // ── signaling loop ─────────────────────────────────────────────────────────
+
+  private nextPollDelay() {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return HIDDEN_POLL_MS;
+    }
+    return this.anyPairConnecting() ? FAST_POLL_MS : IDLE_POLL_MS;
+  }
 
   private schedulePoll(delay: number): void {
     if (this.closed) return;
@@ -217,7 +251,7 @@ export class P2PRoom {
     } catch {
       // Transient poll failures are expected (tab sleep, deploy roll); retry.
     }
-    this.schedulePoll(this.anyPairConnecting() ? FAST_POLL_MS : IDLE_POLL_MS);
+    this.schedulePoll(this.nextPollDelay());
   }
 
   private reconcileRoster(peers: { id: string; name: string }[]): void {
@@ -236,6 +270,7 @@ export class P2PRoom {
       if (!alive.has(id)) {
         slot.pc.close();
         this.peers.delete(id);
+        this.signalQueues.delete(id);
       }
     }
     this.emitPeers();
@@ -415,6 +450,7 @@ export class P2PRoom {
           // Candidate raced ahead of its SDP — hold it until the description
           // lands (flushed after every successful setRemoteDescription).
           slot.pendingCandidates.push(candidate);
+          if (slot.pendingCandidates.length > 24) slot.pendingCandidates.shift();
           return;
         }
         try {

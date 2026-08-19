@@ -22,6 +22,7 @@ import {
   themeDurationTotals,
 } from "@/lib/poker";
 import { useBoardStore } from "@/lib/kanban";
+import { errorMessage, triggerDownload } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 const POKER_ROOM = "ledger-poker";
@@ -136,14 +137,14 @@ export function PlanningPoker({
   playerIdsRef.current = playerIds;
 
   useEffect(() => {
-    if (!seeding || !p2p.joined) return;
+    if (!p2p.joined) return;
     const current = stateRef.current;
     if (!current || current.phase === "done") return;
     p2p.send({
       type: "sync",
-      state: { ...current, hostId: p2p.selfId },
+      state: { ...current, hostId: current.hostId === "pending" ? p2p.selfId : current.hostId },
     } satisfies PokerMessage);
-  }, [seeding, p2p.joined, p2p.peers.length, p2p.selfId, p2p.send]);
+  }, [p2p.joined, p2p.peers.length, p2p.selfId, p2p.send]);
 
   const card = state?.cards[state.index] ?? null;
   const myVote = state ? state.votes[p2p.selfId] ?? null : null;
@@ -184,16 +185,17 @@ export function PlanningPoker({
 
   function download() {
     if (!state) return;
-    commitPokerResults(state.cards);
-    p2p.send({ type: "commit", cards: state.cards } satisfies PokerMessage);
-    const blob = new Blob([formatPokerTxt(state.cards)], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "planning-poker.txt";
-    link.click();
-    URL.revokeObjectURL(url);
-    toast.success("Durations saved. Planning cards moved to To Do.");
+    try {
+      commitPokerResults(state.cards);
+      p2p.send({ type: "commit", cards: state.cards } satisfies PokerMessage);
+      const blob = new Blob([formatPokerTxt(state.cards)], {
+        type: "text/plain;charset=utf-8",
+      });
+      triggerDownload(blob, "planning-poker.txt");
+      toast.success("Durations saved. Planning cards moved to To Do.");
+    } catch (error) {
+      toast.error(errorMessage(error, "Could not download the planning list."));
+    }
   }
 
   const revealed = state?.phase === "reveal";
