@@ -1,6 +1,18 @@
+import { useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { collectPlanningCards, useBoardStore } from "@/lib/kanban";
+import { cn } from "@/lib/utils";
 
 type PokerLaunchProps = {
   onStart: () => void;
@@ -10,6 +22,7 @@ const FACES = ["1", "2", "3", "5", "8", "13"] as const;
 
 export function PokerLaunch({ onStart }: PokerLaunchProps) {
   const waiting = useBoardStore((state) => collectPlanningCards(state.themes).length);
+  const [confirming, setConfirming] = useState(false);
 
   return (
     <section className="overflow-hidden rounded-xl bg-bg-elevated shadow-border">
@@ -46,12 +59,34 @@ export function PokerLaunch({ onStart }: PokerLaunchProps) {
               </span>
             ))}
           </div>
-          <Button type="button" onClick={onStart} className="h-11 px-5">
+          <Button type="button" onClick={() => setConfirming(true)} className="h-11 px-5">
             Start planning poker
             <ArrowRight className="size-4" />
           </Button>
         </div>
       </div>
+
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start planning poker?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {waiting === 0
+                ? "The room will open now. Planning cards from every tab will land on the table as they appear."
+                : `This opens the live room and loads ${waiting} ${waiting === 1 ? "card" : "cards"} from Planning across every tab. Votes stay hidden until everyone has played.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Not now</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants())}
+              onClick={onStart}
+            >
+              Enter room
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

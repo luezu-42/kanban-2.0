@@ -9,7 +9,8 @@ import { WelcomeScreen, WelcomeSkeleton } from "@/components/welcome-screen";
 import { useBoardStore } from "@/lib/kanban";
 import { type PokerCard, planningDeck } from "@/lib/poker";
 import { useProfileStore } from "@/lib/profile";
-import { loadProfile } from "@/lib/workspace";
+import { getUnlockToken } from "@/lib/unlock";
+import { checkUnlock, loadProfile } from "@/lib/workspace";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -19,6 +20,7 @@ type PokerSession = {
 
 function Home() {
   const [ready, setReady] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
   const [poker, setPoker] = useState<PokerSession | null>(null);
   const name = useProfileStore((state) => state.name);
   const setName = useProfileStore((state) => state.setName);
@@ -27,16 +29,33 @@ function Home() {
     let cancelled = false;
     async function boot() {
       await Promise.resolve(useProfileStore.persist.rehydrate());
-      const profile = useProfileStore.getState();
-      if (!profile.name && profile.deviceId) {
+      const token = getUnlockToken();
+      let ok = false;
+      if (token) {
         try {
-          const remote = await loadProfile({ data: { deviceId: profile.deviceId } });
-          if (!cancelled && remote.name) setName(remote.name);
+          const checked = await checkUnlock({ data: { token } });
+          ok = checked.ok;
         } catch {
-          // Keep the local name if the profile cannot load.
+          ok = false;
         }
       }
-      if (!cancelled) setReady(true);
+      if (ok) {
+        const profile = useProfileStore.getState();
+        if (!profile.name && profile.deviceId) {
+          try {
+            const remote = await loadProfile({
+              data: { deviceId: profile.deviceId, token },
+            });
+            if (!cancelled && remote.name) setName(remote.name);
+          } catch {
+            // Keep the local name if the profile cannot load.
+          }
+        }
+      }
+      if (!cancelled) {
+        setUnlocked(ok);
+        setReady(true);
+      }
     }
     void boot();
     return () => {
@@ -52,7 +71,24 @@ function Home() {
   const exitPoker = useCallback(() => setPoker(null), []);
 
   if (!ready) return <WelcomeSkeleton />;
-  if (!name) return <WelcomeScreen />;
+  if (!unlocked) {
+    return (
+      <WelcomeScreen
+        needName={!name}
+        requirePassword
+        onUnlocked={() => setUnlocked(true)}
+      />
+    );
+  }
+  if (!name) {
+    return (
+      <WelcomeScreen
+        needName
+        requirePassword={false}
+        onUnlocked={() => setUnlocked(true)}
+      />
+    );
+  }
 
   return (
     <main className="min-h-dvh bg-bg text-fg">

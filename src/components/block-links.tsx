@@ -87,6 +87,9 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
 
     function measure() {
       if (!scroller) return;
+      const overlay = scroller.querySelector<HTMLElement>(".block-links-svg");
+      const previous = overlay?.style.display;
+      if (overlay) overlay.style.display = "none";
       const next: Link[] = [];
       for (const card of Object.values(cards)) {
         if (!card.blocked || !card.blockedBy.length) continue;
@@ -110,6 +113,7 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
         width: Math.max(scroller.scrollWidth, scroller.clientWidth),
         height: Math.max(scroller.scrollHeight, scroller.clientHeight),
       };
+      if (overlay) overlay.style.display = previous ?? "";
       setSize((current) =>
         current.width === nextSize.width && current.height === nextSize.height
           ? current
@@ -126,7 +130,6 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
     frame();
     window.addEventListener("resize", frame);
     const observer = new ResizeObserver(frame);
-    observer.observe(scroller);
     for (const node of scroller.querySelectorAll("[data-card-id]")) {
       observer.observe(node);
     }
@@ -140,7 +143,7 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
 
   return (
     <svg
-      className="pointer-events-none absolute top-0 left-0 z-20 overflow-visible text-danger"
+      className="block-links-svg pointer-events-none absolute top-0 left-0 z-20 overflow-hidden text-danger"
       width={size.width}
       height={size.height}
       viewBox={`0 0 ${size.width} ${size.height}`}

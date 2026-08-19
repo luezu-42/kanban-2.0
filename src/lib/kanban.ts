@@ -442,10 +442,13 @@ function seedThemes(): Pick<BoardStore, "themes" | "activeThemeId"> {
 }
 
 function withActive(state: BoardStore, updater: (theme: Theme) => Theme) {
+  const current =
+    state.themes.find((theme) => theme.id === state.activeThemeId) ?? state.themes[0];
+  if (!current) return state;
+  const next = updater(current);
+  if (next === current) return state;
   return {
-    themes: state.themes.map((theme) =>
-      theme.id === state.activeThemeId ? updater(theme) : theme,
-    ),
+    themes: state.themes.map((theme) => (theme.id === current.id ? next : theme)),
   };
 }
 
@@ -1027,7 +1030,22 @@ export const useBoardStore = create<BoardStore>()(
       replaceBoard: (themes, activeThemeId) => {
         const parsed = parseBoardPayload({ themes, activeThemeId });
         if (!parsed) return;
-        set(parsed);
+        set((state) => {
+          if (
+            state.activeThemeId === parsed.activeThemeId &&
+            state.themes === parsed.themes
+          ) {
+            return state;
+          }
+          if (
+            state.activeThemeId === parsed.activeThemeId &&
+            state.themes.length === parsed.themes.length &&
+            state.themes.every((theme, index) => theme === parsed.themes[index])
+          ) {
+            return state;
+          }
+          return parsed;
+        });
       },
 
       applyCard: (incoming) => {

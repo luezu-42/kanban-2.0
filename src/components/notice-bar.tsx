@@ -28,13 +28,14 @@ export function NoticeBar() {
   }, [open, theme.id, theme.notice, markNoticeRead]);
 
   useEffect(() => {
+    if (!open) return;
     if (draft === theme.notice) return;
     const timer = window.setTimeout(() => {
       setThemeNotice(draft);
       markNoticeRead(theme.id, draft);
     }, 280);
     return () => window.clearTimeout(timer);
-  }, [draft, theme.id, theme.notice, setThemeNotice, markNoticeRead]);
+  }, [open, draft, theme.id, theme.notice, setThemeNotice, markNoticeRead]);
 
   const hasText = theme.notice.trim().length > 0;
   const unread = hasText && !open && lastRead !== theme.notice;

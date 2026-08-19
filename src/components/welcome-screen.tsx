@@ -2,26 +2,58 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getUnlockToken, setUnlockToken } from "@/lib/unlock";
 import { useProfileStore } from "@/lib/profile";
-import { saveProfile } from "@/lib/workspace";
+import { saveProfile, unlockWorkspace } from "@/lib/workspace";
 
-export function WelcomeScreen() {
+export function WelcomeScreen({
+  needName,
+  requirePassword,
+  onUnlocked,
+}: {
+  needName: boolean;
+  requirePassword: boolean;
+  onUnlocked: () => void;
+}) {
   const setName = useProfileStore((state) => state.setName);
-  const [value, setValue] = useState("");
+  const [name, setNameValue] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const next = value.trim();
-    if (!next || busy) return;
+    const nextName = name.trim();
+    if (needName && !nextName) return;
+    if (requirePassword && !password) return;
+    if (busy) return;
     setBusy(true);
+    setError("");
     try {
-      const saved = await saveProfile({
-        data: { deviceId: useProfileStore.getState().deviceId, name: next },
-      });
-      setName(saved.name ?? next);
+      let token = getUnlockToken();
+      if (requirePassword) {
+        const unlocked = await unlockWorkspace({ data: { password } });
+        if (!unlocked.ok) {
+          setError("Wrong password.");
+          setPassword("");
+          return;
+        }
+        token = unlocked.token;
+        setUnlockToken(token);
+      }
+      if (needName) {
+        const saved = await saveProfile({
+          data: {
+            deviceId: useProfileStore.getState().deviceId,
+            name: nextName,
+            token,
+          },
+        });
+        setName(saved.name ?? nextName);
+      }
+      onUnlocked();
     } catch {
-      setName(next);
+      setError(requirePassword ? "Could not unlock the workspace." : "Could not save your name.");
     } finally {
       setBusy(false);
     }
@@ -34,27 +66,55 @@ export function WelcomeScreen() {
           Ledger
         </p>
         <h1 className="font-display mt-3 text-4xl leading-none tracking-tight sm:text-5xl">
-          What should we call you?
+          {needName ? "Join the board" : "Unlock the board"}
         </h1>
         <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted">
-          Just a name for this device. We will not ask again.
+          {needName
+            ? requirePassword
+              ? "Enter your name and the shared workspace password."
+              : "Just a name for this device. We will not ask again."
+            : "This workspace is private. Enter the shared password to continue."}
         </p>
 
-        <div className="mt-8 grid gap-2">
-          <Label htmlFor="profile-name">Name</Label>
-          <Input
-            id="profile-name"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder="Your name"
-            autoFocus
-            required
-            maxLength={40}
-            autoComplete="name"
-          />
-        </div>
+        {needName ? (
+          <div className="mt-8 grid gap-2">
+            <Label htmlFor="profile-name">Name</Label>
+            <Input
+              id="profile-name"
+              value={name}
+              onChange={(event) => setNameValue(event.target.value)}
+              placeholder="Your name"
+              autoFocus
+              required
+              maxLength={40}
+              autoComplete="name"
+            />
+          </div>
+        ) : null}
 
-        <Button type="submit" className="mt-6 w-full" disabled={!value.trim() || busy}>
+        {requirePassword ? (
+          <div className={`${needName ? "mt-4" : "mt-8"} grid gap-2`}>
+            <Label htmlFor="workspace-password">Password</Label>
+            <Input
+              id="workspace-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Shared password"
+              autoFocus={!needName}
+              required
+              autoComplete="current-password"
+            />
+          </div>
+        ) : null}
+
+        {error ? <p className="mt-3 text-sm text-urgent">{error}</p> : null}
+
+        <Button
+          type="submit"
+          className="mt-6 w-full"
+          disabled={(needName && !name.trim()) || (requirePassword && !password) || busy}
+        >
           Continue
         </Button>
       </form>

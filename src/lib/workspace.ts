@@ -74,9 +74,33 @@ function assignInPayload(
   };
 }
 
-export const loadProfile = createServerFn({ method: "GET" })
-  .validator((data: { deviceId: string }) => ({ deviceId: data.deviceId.trim() }))
+export const unlockWorkspace = createServerFn({ method: "POST" })
+  .validator((data: { password: string }) => ({ password: data.password }))
   .handler(async ({ data }) => {
+    const { unlockWithPassword } = await import("@/lib/workspace-gate.server");
+    return unlockWithPassword(data.password);
+  });
+
+export const checkUnlock = createServerFn({ method: "GET" })
+  .validator((data: { token: string }) => ({ token: data.token }))
+  .handler(async ({ data }) => {
+    try {
+      const { assertUnlock } = await import("@/lib/workspace-gate.server");
+      await assertUnlock(data.token);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+export const loadProfile = createServerFn({ method: "GET" })
+  .validator((data: { deviceId: string; token: string }) => ({
+    deviceId: data.deviceId.trim(),
+    token: data.token,
+  }))
+  .handler(async ({ data }) => {
+    const { assertUnlock } = await import("@/lib/workspace-gate.server");
+    await assertUnlock(data.token);
     if (!data.deviceId) return { name: null };
     const sql = await getSql();
     const rows = await sql<{ name: string }>`
@@ -86,11 +110,14 @@ export const loadProfile = createServerFn({ method: "GET" })
   });
 
 export const saveProfile = createServerFn({ method: "POST" })
-  .validator((data: { deviceId: string; name: string }) => ({
+  .validator((data: { deviceId: string; name: string; token: string }) => ({
     deviceId: data.deviceId.trim(),
     name: data.name.trim(),
+    token: data.token,
   }))
   .handler(async ({ data }) => {
+    const { assertUnlock } = await import("@/lib/workspace-gate.server");
+    await assertUnlock(data.token);
     if (!data.deviceId || !data.name) return { name: null };
     const sql = await getSql();
     await sql`
@@ -102,24 +129,39 @@ export const saveProfile = createServerFn({ method: "POST" })
     return { name: data.name };
   });
 
-export const loadWorkspace = createServerFn({ method: "GET" }).handler(async () => {
-  return readPayload();
-});
+export const loadWorkspace = createServerFn({ method: "GET" })
+  .validator((data: { token: string }) => ({ token: data.token }))
+  .handler(async ({ data }) => {
+    const { assertUnlock } = await import("@/lib/workspace-gate.server");
+    await assertUnlock(data.token);
+    return readPayload();
+  });
 
 export const saveWorkspace = createServerFn({ method: "POST" })
-  .validator((data: BoardPayload) => toPayload(data.themes, data.activeThemeId))
+  .validator((data: BoardPayload & { token: string }) => {
+    const payload = toPayload(data.themes, data.activeThemeId);
+    return payload ? { ...payload, token: data.token } : null;
+  })
   .handler(async ({ data }) => {
     if (!data) return { ok: false };
-    await writePayload(data);
+    const { assertUnlock } = await import("@/lib/workspace-gate.server");
+    await assertUnlock(data.token);
+    await writePayload({
+      themes: data.themes,
+      activeThemeId: data.activeThemeId,
+    });
     return { ok: true };
   });
 
 export const claimAssignee = createServerFn({ method: "POST" })
-  .validator((data: { cardId: string; name: string }) => ({
+  .validator((data: { cardId: string; name: string; token: string }) => ({
     cardId: data.cardId.trim(),
     name: data.name.trim(),
+    token: data.token,
   }))
   .handler(async ({ data }) => {
+    const { assertUnlock } = await import("@/lib/workspace-gate.server");
+    await assertUnlock(data.token);
     if (!data.cardId || !data.name) {
       return { ok: false as const, reason: "invalid" as const, card: null, assignee: "" };
     }

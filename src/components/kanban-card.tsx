@@ -30,6 +30,7 @@ import {
 } from "@/lib/kanban";
 import { useProfileStore } from "@/lib/profile";
 import { cn } from "@/lib/utils";
+import { getUnlockToken } from "@/lib/unlock";
 import { claimAssignee } from "@/lib/workspace";
 
 type KanbanCardProps = {
@@ -112,7 +113,7 @@ export function CardFace({
     if (!profileName) return;
     try {
       const result = await claimAssignee({
-        data: { cardId: card.id, name: profileName },
+        data: { cardId: card.id, name: profileName, token: getUnlockToken() },
       });
       if (result.ok) {
         applyCard(result.card);

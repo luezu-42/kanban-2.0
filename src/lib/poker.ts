@@ -107,6 +107,27 @@ export function formatPokerTxt(cards: PokerCard[]) {
     .join("\n\n");
 }
 
+export function themeDurationTotals(cards: PokerCard[]) {
+  const groups = new Map<
+    string,
+    { themeId: string; themeName: string; total: number; counted: number }
+  >();
+  for (const card of cards) {
+    const existing = groups.get(card.themeId) ?? {
+      themeId: card.themeId,
+      themeName: card.themeName,
+      total: 0,
+      counted: 0,
+    };
+    if (typeof card.duration === "number") {
+      existing.total += card.duration;
+      existing.counted += 1;
+    }
+    groups.set(card.themeId, existing);
+  }
+  return [...groups.values()];
+}
+
 export function isPokerVote(value: unknown): value is PokerVote {
   return value === "skip" || (typeof value === "number" && VOTE_VALUES.includes(value as never));
 }

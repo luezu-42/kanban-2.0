@@ -19,6 +19,7 @@ import {
   isPokerState,
   isPokerVote,
   numericVotes,
+  themeDurationTotals,
 } from "@/lib/poker";
 import { useBoardStore } from "@/lib/kanban";
 import { cn } from "@/lib/utils";
@@ -134,11 +135,14 @@ export function PlanningPoker({
   playerIdsRef.current = playerIds;
 
   useEffect(() => {
+    if (!seeding || !p2p.joined) return;
     const current = stateRef.current;
-    if (!seeding || !current || !p2p.joined) return;
-    const payload: PokerMessage = { type: "sync", state: { ...current, hostId: p2p.selfId } };
-    p2p.send(payload);
-  }, [seeding, p2p.joined, p2p.peers.length, p2p.selfId, p2p.send, state]);
+    if (!current || current.phase === "done") return;
+    p2p.send({
+      type: "sync",
+      state: { ...current, hostId: p2p.selfId },
+    } satisfies PokerMessage);
+  }, [seeding, p2p.joined, p2p.peers.length, p2p.selfId, p2p.send]);
 
   const card = state?.cards[state.index] ?? null;
   const myVote = state ? state.votes[p2p.selfId] ?? null : null;
@@ -193,6 +197,8 @@ export function PlanningPoker({
 
   const revealed = state?.phase === "reveal";
   const done = state?.phase === "done";
+  const themeTotals = done && state ? themeDurationTotals(state.cards) : [];
+  const grandTotal = themeTotals.reduce((sum, group) => sum + group.total, 0);
   const progress =
     state && state.cards.length
       ? Math.min(1, (done ? state.cards.length : state.index) / state.cards.length)
@@ -257,6 +263,37 @@ export function PlanningPoker({
               Download list
             </Button>
           </div>
+          {themeTotals.length ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {themeTotals.map((group) => (
+                <div
+                  key={group.themeId}
+                  className="rounded-lg bg-surface px-4 py-3 shadow-border"
+                >
+                  <p className="truncate text-xs font-medium tracking-wide text-subtle uppercase">
+                    {group.themeName}
+                  </p>
+                  <p className="font-display mt-1 text-3xl tabular-nums text-fg">
+                    {group.total}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    {group.counted} {group.counted === 1 ? "estimate" : "estimates"}
+                  </p>
+                </div>
+              ))}
+              {themeTotals.length > 1 ? (
+                <div className="rounded-lg bg-bg px-4 py-3 shadow-border sm:col-span-2 lg:col-span-1">
+                  <p className="text-xs font-medium tracking-wide text-subtle uppercase">
+                    All tabs
+                  </p>
+                  <p className="font-display mt-1 text-3xl tabular-nums text-fg">
+                    {grandTotal}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">Sum of every estimate</p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <ol className="grid gap-2">
             {state.cards.map((item, index) => (
               <li
