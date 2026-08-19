@@ -100,7 +100,7 @@ function imageSize(src: string): Promise<{ width: number; height: number }> {
 export function WhiteboardCanvas({ onClose }: { onClose: () => void }) {
   const theme = useBoardStore(selectActiveTheme);
   const setThemeWhiteboard = useBoardStore((state) => state.setThemeWhiteboard);
-  const saved = theme.whiteboard ?? emptyWhiteboard();
+  const saved = theme.whiteboard;
   const [doc, setDoc] = useState<WhiteboardDoc>(() => normalizeWhiteboard(saved));
   const [camera, setCamera] = useState<Camera>({ x: 48, y: 48, z: 1 });
   const [tool, setTool] = useState<WhiteboardTool>("select");
@@ -111,7 +111,10 @@ export function WhiteboardCanvas({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const space = useRef(false);
   const frame = useRef<HTMLDivElement>(null);
-  const savedSig = useMemo(() => whiteboardSignature(saved), [saved]);
+  const savedSig = useMemo(
+    () => whiteboardSignature(saved ?? emptyWhiteboard()),
+    [saved],
+  );
   const dirty = whiteboardSignature(doc) !== savedSig;
 
   useEffect(() => {
@@ -124,7 +127,11 @@ export function WhiteboardCanvas({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (dirty) return;
-    setDoc(normalizeWhiteboard(saved));
+    setDoc((current) =>
+      whiteboardSignature(current) === savedSig
+        ? current
+        : normalizeWhiteboard(saved),
+    );
   }, [savedSig, dirty, saved]);
 
   const nodesById = useMemo(() => {

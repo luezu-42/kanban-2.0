@@ -14,7 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { LayoutGrid, PenLine } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { BlockLinks } from "@/components/block-links";
@@ -55,6 +55,10 @@ import {
 import { useProfileStore } from "@/lib/profile";
 import { useReviewLive } from "@/lib/review-live";
 
+const POINTER_SENSOR = { activationConstraint: { distance: 6 } };
+const TOUCH_SENSOR = { activationConstraint: { delay: 160, tolerance: 6 } };
+const KEYBOARD_SENSOR = { coordinateGetter: sortableKeyboardCoordinates };
+
 const dropAnimation = {
   duration: 240,
   easing: "cubic-bezier(0.22, 1, 0.36, 1)",
@@ -77,8 +81,8 @@ export function KanbanBoard() {
   } | null>(null);
   const [pendingPrAlert, setPendingPrAlert] = useState<Card | null>(null);
   const [pendingBlock, setPendingBlock] = useState<Card | null>(null);
-  const [boardEl, setBoardEl] = useState<HTMLDivElement | null>(null);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const boardRef = useRef<HTMLDivElement | null>(null);
 
   const theme = useBoardStore(selectActiveTheme);
   const addCard = useBoardStore((state) => state.addCard);
@@ -119,13 +123,9 @@ export function KanbanBoard() {
   }, []);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 160, tolerance: 6 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
+    useSensor(PointerSensor, POINTER_SENSOR),
+    useSensor(TouchSensor, TOUCH_SENSOR),
+    useSensor(KeyboardSensor, KEYBOARD_SENSOR),
   );
 
   const columns = useMemo(
@@ -164,17 +164,10 @@ export function KanbanBoard() {
     const nextColumn = resolveColumn(overId);
     const from = findColumnOf(order, activeId);
     if (from && nextColumn && !canEnterColumn(from, nextColumn)) {
-      setOverColumn(from);
+      setOverColumn((current) => (current === from ? current : from));
       return;
     }
-    setOverColumn(nextColumn);
-
-    if (!overId || !nextColumn) return;
-    if (!from || from === nextColumn) return;
-    if (nextColumn === "review") return;
-    const card = cards[activeId];
-    moveCard(activeId, overId);
-    if (card && from === "review") publishLeave(card.id, nextColumn);
+    setOverColumn((current) => (current === nextColumn ? current : nextColumn));
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -189,6 +182,9 @@ export function KanbanBoard() {
         setPendingReview({ card, from });
       } else if (from && to && !canEnterColumn(from, to)) {
         toast.error("Cards reach Done from Review.");
+      } else if (from && to && from !== to) {
+        moveCard(activeId, overId);
+        if (card && from === "review") publishLeave(card.id, to);
       } else if (from && to && from === to && from !== "review") {
         moveCard(activeId, overId);
       }
@@ -378,13 +374,13 @@ export function KanbanBoard() {
         >
           <div
             key={theme.id}
-            ref={setBoardEl}
+            ref={boardRef}
             className="board-scroller relative flex snap-x snap-mandatory items-start gap-3 overflow-x-auto pb-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
           >
             <BlockLinks
               cards={cards}
               layoutKey={linkLayoutKey}
-              scroller={boardEl}
+              scrollerRef={boardRef}
             />
             {columns.map((column) => (
               <KanbanColumn
@@ -395,6 +391,7 @@ export function KanbanBoard() {
                 empty={column.empty}
                 emptyHint={column.emptyHint}
                 cards={column.cards}
+                itemIds={order[column.id]}
                 isOver={overColumn === column.id}
                 onAdd={(columnId) => setForm({ mode: "create", columnId })}
                 onEdit={(card) => setForm({ mode: "edit", card })}

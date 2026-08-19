@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type { Card } from "@/lib/kanban";
 
 type Link = {
@@ -13,7 +13,7 @@ type Link = {
 type BlockLinksProps = {
   cards: Record<string, Card>;
   layoutKey: string;
-  scroller: HTMLElement | null;
+  scrollerRef: RefObject<HTMLElement | null>;
 };
 
 type Box = {
@@ -75,7 +75,7 @@ function sameLinks(left: Link[], right: Link[]) {
   );
 }
 
-export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
+export function BlockLinks({ cards, layoutKey, scrollerRef }: BlockLinksProps) {
   const uid = useId().replace(/:/g, "");
   const glowId = `block-glow-${uid}`;
   const [links, setLinks] = useState<Link[]>([]);
@@ -83,32 +83,34 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
   const linksRef = useRef<Link[]>([]);
 
   useEffect(() => {
+    const scroller = scrollerRef.current;
     if (!scroller) return;
 
     function measure() {
-      if (!scroller) return;
+      const node = scrollerRef.current;
+      if (!node) return;
       const next: Link[] = [];
       for (const card of Object.values(cards)) {
         if (!card.blocked || !card.blockedBy.length) continue;
-        const toNode = scroller.querySelector<HTMLElement>(
+        const toNode = node.querySelector<HTMLElement>(
           `[data-card-id="${card.id}"]`,
         );
         if (!toNode) continue;
-        const to = point(scroller, toNode);
+        const to = point(node, toNode);
         for (const fromId of card.blockedBy) {
-          const fromNode = scroller.querySelector<HTMLElement>(
+          const fromNode = node.querySelector<HTMLElement>(
             `[data-card-id="${fromId}"]`,
           );
           if (!fromNode) continue;
           next.push({
             id: `${fromId}-${card.id}`,
-            ...curve(point(scroller, fromNode), to),
+            ...curve(point(node, fromNode), to),
           });
         }
       }
       const nextSize = {
-        width: Math.max(scroller.scrollWidth, scroller.clientWidth),
-        height: Math.max(scroller.scrollHeight, scroller.clientHeight),
+        width: Math.max(node.scrollWidth, node.clientWidth),
+        height: Math.max(node.scrollHeight, node.clientHeight),
       };
       setSize((current) =>
         current.width === nextSize.width && current.height === nextSize.height
@@ -128,7 +130,7 @@ export function BlockLinks({ cards, layoutKey, scroller }: BlockLinksProps) {
       window.removeEventListener("resize", measure);
       scroller.removeEventListener("scroll", measure);
     };
-  }, [cards, layoutKey, scroller]);
+  }, [cards, layoutKey, scrollerRef]);
 
   if (!links.length || !size.width) return null;
 

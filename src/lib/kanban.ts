@@ -267,7 +267,27 @@ export function sortIdsByUrgency(
     if (cards[id].urgent) urgent.push(id);
     else rest.push(id);
   }
-  return [...urgent, ...rest];
+  const next = [...urgent, ...rest];
+  if (next.length === ids.length && next.every((id, index) => id === ids[index])) {
+    return ids;
+  }
+  return next;
+}
+
+function sameOrder(
+  left: Record<ColumnId, string[]>,
+  right: Record<ColumnId, string[]>,
+) {
+  for (const columnId of COLUMN_IDS) {
+    const a = left[columnId];
+    const b = right[columnId];
+    if (a === b) continue;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+  }
+  return true;
 }
 
 function sortThemeByUrgency(theme: Theme): Theme {
@@ -278,16 +298,18 @@ function sortThemeByUrgency(theme: Theme): Theme {
         ? (theme.order[columnId] ?? []).filter((id) => theme.cards[id])
         : sortIdsByUrgency(theme.cards, theme.order[columnId] ?? []);
   }
-  return { ...theme, order };
+  return sameOrder(theme.order, order) ? theme : { ...theme, order };
 }
 
 function sortThemeColumn(theme: Theme, columnId: ColumnId): Theme {
   if (columnId === "review") return theme;
+  const next = sortIdsByUrgency(theme.cards, theme.order[columnId]);
+  if (next === theme.order[columnId]) return theme;
   return {
     ...theme,
     order: {
       ...theme.order,
-      [columnId]: sortIdsByUrgency(theme.cards, theme.order[columnId]),
+      [columnId]: next,
     },
   };
 }

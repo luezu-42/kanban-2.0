@@ -64,8 +64,10 @@ export type Side = "n" | "e" | "s" | "w";
 
 export const ASSET_PREFIX = "asset:";
 
+export const EMPTY_WHITEBOARD: WhiteboardDoc = { nodes: [], connectors: [] };
+
 export function emptyWhiteboard(): WhiteboardDoc {
-  return { nodes: [], connectors: [] };
+  return EMPTY_WHITEBOARD;
 }
 
 export function isWhiteboardImageSrc(src: string) {

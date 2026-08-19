@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ChevronsDownUp, ChevronsUpDown, Plus, Volume2, VolumeX } from "lucide-react";
@@ -31,6 +32,7 @@ type KanbanColumnProps = {
   empty: string;
   emptyHint: string;
   cards: Card[];
+  itemIds: string[];
   isOver: boolean;
   onAdd: (columnId: ColumnId) => void;
   onEdit: (card: Card) => void;
@@ -51,6 +53,7 @@ export function KanbanColumn({
   empty,
   emptyHint,
   cards,
+  itemIds,
   isOver,
   onAdd,
   onEdit,
@@ -63,15 +66,20 @@ export function KanbanColumn({
   soundOn,
   onSoundToggle,
 }: KanbanColumnProps) {
+  const droppableData = useMemo(
+    () => ({ type: "column" as const, columnId: id }),
+    [id],
+  );
   const { setNodeRef } = useDroppable({
     id: columnDroppableId(id),
-    data: { type: "column", columnId: id },
+    data: droppableData,
   });
   const canAdd = columnAllowsCreate(id);
   const doneCompact = useProfileStore((state) => state.doneCompact);
   const setDoneCompact = useProfileStore((state) => state.setDoneCompact);
   const collapsed = id === "done" && doneCompact && cards.length > DONE_PREVIEW;
   const visibleCards = collapsed ? cards.slice(0, DONE_PREVIEW) : cards;
+  const sortableIds = collapsed ? itemIds.slice(0, DONE_PREVIEW) : itemIds;
   const hiddenCount = cards.length - visibleCards.length;
 
   return (
@@ -165,7 +173,7 @@ export function KanbanColumn({
         )}
       >
         <SortableContext
-          items={visibleCards.map((card) => card.id)}
+          items={sortableIds}
           strategy={verticalListSortingStrategy}
         >
           {visibleCards.map((card) => (

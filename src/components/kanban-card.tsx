@@ -439,7 +439,7 @@ export function KanbanCard({
     isDragging,
   } = useSortable({
     id: card.id,
-    data: { type: "card", card },
+    data: { type: "card", cardId: card.id },
   });
 
   return (
