@@ -12,6 +12,42 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
+/** Excalidraw (and mermaid-to-excalidraw) touch `document` at import time.
+ *  Keep them out of the Nitro/SSR graph so `/` does not 500. */
+function stubExcalidrawOnServer(): Plugin {
+  const stubId = "\0excalidraw-ssr-stub";
+  return {
+    name: "stub-excalidraw-ssr",
+    enforce: "pre",
+    resolveId(id, _importer, options) {
+      const envName = this.environment?.name;
+      const isServer =
+        envName === "ssr" ||
+        envName === "nitro" ||
+        Boolean(options?.ssr);
+      if (!isServer) return null;
+      if (
+        id === "@excalidraw/excalidraw" ||
+        id.startsWith("@excalidraw/excalidraw/") ||
+        id === "@excalidraw/mermaid-to-excalidraw" ||
+        id.startsWith("@excalidraw/mermaid-to-excalidraw/")
+      ) {
+        return stubId;
+      }
+      return null;
+    },
+    load(id) {
+      if (id !== stubId) return null;
+      return `
+        export const Excalidraw = () => null;
+        export const restore = () => ({ elements: [], appState: {}, files: {} });
+        export const convertToExcalidrawElements = () => [];
+        export default { Excalidraw, restore, convertToExcalidrawElements };
+      `;
+    },
+  };
+}
+
 function excalidrawFontsPlugin(): Plugin {
   const fontsSrc = path.join(
     rootDir,
@@ -190,6 +226,7 @@ export default defineConfig(({ command }) => {
       },
     },
     plugins: [
+      stubExcalidrawOnServer(),
       excalidrawFontsPlugin(),
       pgliteBootstrapPlugin(),
       // Before tanstackStart so /auth/popup never falls through to the SPA.
@@ -207,6 +244,24 @@ export default defineConfig(({ command }) => {
               // false, so removing this silently unwires /?install=1 on deploys.
               serverDir: "./server",
               errorHandler: "./server/error-handler.mjs",
+              // Keep React's jsx-runtime out of the Excalidraw server chunk.
+              // Otherwise every request evaluates document.createElement.
+              rolldownConfig: {
+                output: {
+                  codeSplitting: {
+                    groups: [
+                      {
+                        name: "jsx-runtime",
+                        test: /[\\/]react[\\/](?:cjs[\\/])?react-jsx-runtime/,
+                      },
+                      {
+                        name: "react",
+                        test: /[\\/](?:react|scheduler)[\\/]/,
+                      },
+                    ],
+                  },
+                },
+              },
             }),
           ]
         : []),
