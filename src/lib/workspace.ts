@@ -30,8 +30,13 @@ function toPayload(themes: Theme[], activeThemeId: string): BoardPayload | null 
 export const unlockWorkspace = createServerFn({ method: "POST" })
   .validator((data: { password: string }) => ({ password: data.password }))
   .handler(async ({ data }) => {
-    const { unlockWithPassword } = await import("@/lib/workspace-gate.server");
-    return unlockWithPassword(data.password);
+    try {
+      const { unlockWithPassword } = await import("@/lib/workspace-gate.server");
+      return unlockWithPassword(data.password);
+    } catch (error) {
+      console.error("[unlockWorkspace]", error);
+      throw error;
+    }
   });
 
 export const checkUnlock = createServerFn({ method: "GET" })
@@ -77,10 +82,15 @@ export const loadWorkspace = createServerFn({ method: "GET" })
     version: typeof data.version === "number" && Number.isFinite(data.version) ? data.version : 0,
   }))
   .handler(async ({ data }): Promise<LoadWorkspaceResult> => {
-    const { assertUnlock } = await import("@/lib/workspace-gate.server");
-    await assertUnlock(data.token);
-    const { loadWorkspaceSnapshot } = await import("@/lib/workspace.server");
-    return loadWorkspaceSnapshot(data.version);
+    try {
+      const { assertUnlock } = await import("@/lib/workspace-gate.server");
+      await assertUnlock(data.token);
+      const { loadWorkspaceSnapshot } = await import("@/lib/workspace.server");
+      return loadWorkspaceSnapshot(data.version);
+    } catch (error) {
+      console.error("[loadWorkspace]", error);
+      throw error;
+    }
   });
 
 export const saveWorkspace = createServerFn({ method: "POST" })

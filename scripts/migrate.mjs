@@ -26,7 +26,12 @@ function splitSqlStatements(text) {
   return text
     .split(";")
     .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.length > 0 && !chunk.startsWith("--"));
+    .filter((chunk) =>
+      chunk.split("\n").some((line) => {
+        const trimmed = line.trim();
+        return trimmed.length > 0 && !trimmed.startsWith("--");
+      }),
+    );
 }
 
 async function migrateTurso() {
@@ -82,7 +87,9 @@ async function migratePostgres() {
       const text = await readFile(join(dir, name), "utf8");
       try {
         await client.query("BEGIN");
-        await client.query(text);
+        for (const statement of splitSqlStatements(text)) {
+          await client.query(statement);
+        }
         await client.query("INSERT INTO _migrations (name) VALUES ($1)", [name]);
         await client.query("COMMIT");
       } catch (err) {

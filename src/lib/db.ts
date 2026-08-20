@@ -1,7 +1,7 @@
-/** App data backend: remote Turso, or a local libSQL file in preview. */
+/** App data backend: Neon Postgres, Turso/libSQL, or local PGLite. */
 import type { InValue } from "@libsql/client";
 
-export type DbSource = "turso" | "local";
+export type DbSource = "turso" | "neon" | "pglite";
 
 function envTrim(key: string): string | undefined {
   if (typeof process === "undefined") return undefined;
@@ -9,7 +9,6 @@ function envTrim(key: string): string | undefined {
   return value ? value : undefined;
 }
 
-// Vercel Marketplace (resource `database-camel-cave`) injects TURSO_*.
 const tursoUrl =
   envTrim("TURSO_DATABASE_URL") ??
   envTrim("LIBSQL_URL") ??
@@ -21,9 +20,12 @@ const tursoToken =
   envTrim("TURSO_DB_AUTH_TOKEN");
 const databaseUrl = envTrim("DATABASE_URL");
 const onVercel = Boolean(envTrim("VERCEL"));
-const isViteBuild = process.env.npm_lifecycle_event === "build";
 
-export const dbSource: DbSource = tursoUrl ? "turso" : "local";
+export const dbSource: DbSource = tursoUrl
+  ? "turso"
+  : databaseUrl
+    ? "neon"
+    : "pglite";
 
 export interface Sql {
   <T = Record<string, unknown>>(
@@ -38,8 +40,10 @@ export interface Sql {
 
 const globalRef = globalThis as typeof globalThis & {
   __tursoSqlPromise__?: Promise<Sql>;
+  __pgSqlPromise__?: Promise<Sql>;
   __pgliteInstance__?: Promise<import("@electric-sql/pglite").PGlite>;
   __pgliteMigrateChain__?: Promise<void>;
+  __pgMigrateChain__?: Promise<void>;
 };
 
 const OID_INT8 = 20;
@@ -63,6 +67,16 @@ function toSql(run: Run): Sql {
   return sql;
 }
 
+/** Board queries are written with SQLite `datetime('now')`; rewrite for Postgres. */
+function toPostgresSql(text: string) {
+  return text
+    .replace(
+      /datetime\('now',\s*'-'\s*\|\|\s*(\$\d+)\s*\|\|\s*' seconds'\)/gi,
+      "now() - ($1 || ' seconds')::interval",
+    )
+    .replace(/datetime\('now'\)/gi, "now()");
+}
+
 function pgPlaceholdersToLibsql(text: string) {
   return text.replace(/\$\d+/g, "?");
 }
@@ -71,7 +85,12 @@ function splitSqlStatements(text: string) {
   return text
     .split(";")
     .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.length > 0 && !chunk.startsWith("--"));
+    .filter((chunk) =>
+      chunk.split("\n").some((line) => {
+        const trimmed = line.trim();
+        return trimmed.length > 0 && !trimmed.startsWith("--");
+      }),
+    );
 }
 
 function asInArgs(params: unknown[] | undefined): InValue[] {
@@ -94,6 +113,19 @@ function asInArgs(params: unknown[] | undefined): InValue[] {
   });
 }
 
+function isIgnorableSqliteMigrationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /duplicate column name|already exists/i.test(message);
+}
+
+function postgresMigrationFiles() {
+  return import.meta.glob("/migrations/*.sql", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+}
+
 async function applySqliteMigrations(
   execute: (sql: string, args?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>,
 ) {
@@ -113,24 +145,49 @@ async function applySqliteMigrations(
     const name = path.split("/").pop() as string;
     if (done.has(name)) continue;
     for (const statement of splitSqlStatements(text)) {
-      await execute(statement);
+      try {
+        await execute(statement);
+      } catch (error) {
+        if (!isIgnorableSqliteMigrationError(error)) throw error;
+      }
     }
     await execute("insert into _migrations (name) values (?)", [name]);
   }
 }
 
+async function applyPostgresMigrations(
+  query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ name?: string }> }>,
+) {
+  await query(
+    "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+  );
+  const doneRows = await query("select name from _migrations");
+  const done = new Set(doneRows.rows.map((row) => String(row.name)));
+  const migrations = postgresMigrationFiles();
+  for (const [path, text] of Object.entries(migrations).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    const name = path.split("/").pop() as string;
+    if (done.has(name)) continue;
+    for (const statement of splitSqlStatements(text)) {
+      await query(statement);
+    }
+    await query(
+      "insert into _migrations (name) values ($1) on conflict (name) do nothing",
+      [name],
+    );
+  }
+}
+
 function createLibsqlSql(): Promise<Sql> {
   globalRef.__tursoSqlPromise__ ??= (async () => {
-    if (onVercel && !tursoUrl) {
-      throw new Error(
-        "Missing TURSO_DATABASE_URL. Connect the Turso store database-camel-cave to this Vercel project so TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are injected.",
-      );
-    }
-    const { createClient } = await import("@libsql/client");
+    const url = tursoUrl ?? "file:/tmp/ledger-preview.db";
+    const remote = !url.startsWith("file:");
+    const { createClient } = remote
+      ? await import("@libsql/client/web")
+      : await import("@libsql/client");
     const client = createClient(
-      tursoUrl
-        ? { url: tursoUrl, authToken: tursoToken }
-        : { url: "file:/tmp/ledger-preview.db" },
+      remote ? { url, authToken: tursoToken } : { url },
     );
     await applySqliteMigrations(async (sql, args) => {
       const inArgs = asInArgs(args);
@@ -151,6 +208,37 @@ function createLibsqlSql(): Promise<Sql> {
     throw err;
   });
   return globalRef.__tursoSqlPromise__;
+}
+
+function createNeonSql(): Promise<Sql> {
+  globalRef.__pgSqlPromise__ ??= (async () => {
+    const { Pool, types } = await import("pg");
+    types.setTypeParser(OID_INT8, Number);
+    types.setTypeParser(OID_DATE, identity);
+    types.setTypeParser(OID_INTERVAL, identity);
+    const pool = new Pool({ connectionString: databaseUrl });
+    const migrate = async () => {
+      await applyPostgresMigrations(async (text, params) => {
+        const result = params?.length
+          ? await pool.query(text, params)
+          : await pool.query(text);
+        return { rows: result.rows as Array<{ name?: string }> };
+      });
+    };
+    const pass = (globalRef.__pgMigrateChain__ ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(migrate);
+    globalRef.__pgMigrateChain__ = pass;
+    await pass;
+    return toSql(async <T>(text: string, params: unknown[]) => {
+      const res = await pool.query(toPostgresSql(text), params);
+      return res.rows as T[];
+    });
+  })().catch((err) => {
+    globalRef.__pgSqlPromise__ = undefined;
+    throw err;
+  });
+  return globalRef.__pgSqlPromise__;
 }
 
 async function openPglite(): Promise<import("@electric-sql/pglite").PGlite> {
@@ -175,11 +263,7 @@ async function openPglite(): Promise<import("@electric-sql/pglite").PGlite> {
   const pg = await globalRef.__pgliteInstance__;
 
   const migrate = async (): Promise<void> => {
-    const migrations = import.meta.glob("/migrations/*.sql", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }) as Record<string, string>;
+    const migrations = postgresMigrationFiles();
     const doneRows = await pg.query<{ name: string }>(
       "select name from _migrations",
     );
@@ -191,7 +275,10 @@ async function openPglite(): Promise<import("@electric-sql/pglite").PGlite> {
       if (done.has(name)) continue;
       await pg.transaction(async (tx) => {
         await tx.exec(text);
-        await tx.query("insert into _migrations (name) values ($1)", [name]);
+        await tx.query(
+          "insert into _migrations (name) values ($1) on conflict (name) do nothing",
+          [name],
+        );
       });
     }
   };
@@ -203,6 +290,14 @@ async function openPglite(): Promise<import("@electric-sql/pglite").PGlite> {
   return pg;
 }
 
+async function createPgliteSql(): Promise<Sql> {
+  const pg = await openPglite();
+  return toSql(async <T>(text: string, params: unknown[]) => {
+    const result = await pg.query<T>(toPostgresSql(text), params);
+    return result.rows;
+  });
+}
+
 let sqlPromise: Promise<Sql> | null = null;
 
 async function createSql(): Promise<Sql> {
@@ -212,7 +307,14 @@ async function createSql(): Promise<Sql> {
         "or a server route loader, never from client code.",
     );
   }
-  return createLibsqlSql();
+  if (dbSource === "turso") return createLibsqlSql();
+  if (dbSource === "neon") return createNeonSql();
+  if (onVercel) {
+    throw new Error(
+      "Missing DATABASE_URL (or TURSO_DATABASE_URL). Production needs a Postgres or Turso connection.",
+    );
+  }
+  return createPgliteSql();
 }
 
 export function getSql(): Promise<Sql> {
@@ -224,22 +326,23 @@ export function getSql(): Promise<Sql> {
 }
 
 export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite> {
-  if (databaseUrl) {
-    throw new Error("getPglite() is only available when DATABASE_URL is unset");
+  if (dbSource !== "pglite") {
+    throw new Error("getPglite() is only available when DATABASE_URL and TURSO_DATABASE_URL are unset");
   }
   return openPglite();
 }
 
 export function ensureDbReady(): Promise<void> {
-  const tasks: Promise<unknown>[] = [getSql()];
-  if (!tursoUrl && !databaseUrl && !onVercel) tasks.push(getPglite());
-  return Promise.all(tasks).then(() => undefined);
+  if (dbSource === "pglite" && !onVercel) {
+    return getSql().then(() => undefined);
+  }
+  return Promise.resolve();
 }
 
 const globalBoot = globalThis as typeof globalThis & {
   __pgBootstrapPromise__?: Promise<void>;
 };
-if (typeof window === "undefined" && !isViteBuild) {
+if (typeof window === "undefined" && dbSource === "pglite" && !onVercel) {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().catch((err) => {
     globalBoot.__pgBootstrapPromise__ = undefined;
     console.error("[db] bootstrap failed:", err);
