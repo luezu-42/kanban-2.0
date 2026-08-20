@@ -4,13 +4,8 @@ import {
   Outlet,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
-import { Toaster } from "sonner";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
-import { applyAppearance } from "@/lib/appearance";
 import { AuthProvider } from "@/lib/auth/provider";
-import { useProfileStore } from "@/lib/profile";
-import { registerLedgerWorker } from "@/lib/sync-queue";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "Ledger";
@@ -61,44 +56,8 @@ function Root() {
         <AuthProvider>
           <Outlet />
         </AuthProvider>
-        <ThemedToaster />
         <Scripts />
       </body>
     </html>
-  );
-}
-
-function ThemedToaster() {
-  const appearance = useProfileStore((state) => state.appearance);
-
-  useEffect(() => {
-    void registerLedgerWorker();
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const result = useProfileStore.persist.rehydrate();
-    void Promise.resolve(result).then(() => {
-      if (cancelled) return;
-      applyAppearance(useProfileStore.getState().appearance);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    applyAppearance(appearance);
-  }, [appearance]);
-
-  return (
-    <Toaster
-      theme={appearance === "dark" ? "dark" : "light"}
-      position="bottom-center"
-      toastOptions={{
-        className:
-          "!bg-bg-elevated !text-fg !border-border !shadow-lift !font-sans",
-      }}
-    />
   );
 }
