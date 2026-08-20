@@ -21,7 +21,7 @@ function stubBrowserOnlyOnServer(): Plugin {
     name: "stub-browser-only-ssr",
     enforce: "pre",
     resolveId(id) {
-      if (this.environment?.name === "client") return null;
+      if (this.environment?.config?.consumer === "client") return null;
       if (
         id === "@excalidraw/excalidraw" ||
         id.startsWith("@excalidraw/excalidraw/") ||
