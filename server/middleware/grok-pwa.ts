@@ -59,6 +59,23 @@ export default async function grokPwaMiddleware(
   event: GrokPwaEvent,
   next: () => unknown | Promise<unknown>,
 ): Promise<unknown> {
+  try {
+    return await runGrokPwa(event, next);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error("[app] unhandled request error:", error);
+    return new Response(JSON.stringify({ error: true, status: 500, message, stack }), {
+      status: 500,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  }
+}
+
+async function runGrokPwa(
+  event: GrokPwaEvent,
+  next: () => unknown | Promise<unknown>,
+): Promise<unknown> {
   const method = (event.req.method ?? "GET").toUpperCase();
   if (method !== "GET") return next();
 
