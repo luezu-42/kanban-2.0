@@ -222,8 +222,9 @@ export function CardDetailsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "inset-4 top-4 left-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden p-0",
+          "details-frame inset-4 top-4 left-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden p-0",
           "sm:inset-8 sm:top-8 sm:left-8",
+          "wide:inset-10 wide:top-10 wide:left-10",
         )}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4 pr-14">

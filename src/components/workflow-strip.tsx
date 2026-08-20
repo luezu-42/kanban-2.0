@@ -10,7 +10,7 @@ export function WorkflowStrip({ counts, onSelect }: WorkflowStripProps) {
   const total = COLUMNS.reduce((sum, column) => sum + counts[column.id], 0);
 
   return (
-    <nav aria-label="Project workflow" className="board-scroller overflow-x-auto">
+    <nav aria-label="Project workflow" className="board-scroller shrink-0 overflow-x-auto">
       <ol className="flex min-w-max items-stretch">
         {COLUMNS.map((column, index) => {
           const count = counts[column.id];

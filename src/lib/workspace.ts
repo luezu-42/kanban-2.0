@@ -1,151 +1,30 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "@/lib/db";
-import {
-  type Card,
-  type Theme,
-  findCardInThemes,
-  parseBoardPayload,
-} from "@/lib/kanban";
-
-const ASSET_PREFIX = "asset:";
+import type { BoardDelta } from "@/lib/board-delta";
+import { parseBoardPayload, type Theme } from "@/lib/kanban";
 
 export const WORKSPACE_ID = "ledger";
+const ASSET_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
 export type BoardPayload = {
   themes: Theme[];
   activeThemeId: string;
 };
 
+export type WorkspaceSnapshot = BoardPayload & { version: number };
+
+export type LoadWorkspaceResult =
+  | { status: "empty" }
+  | { status: "unchanged"; version: number }
+  | ({ status: "ok" } & WorkspaceSnapshot)
+  | ({ status: "delta" } & BoardDelta);
+
+export type SaveWorkspaceResult =
+  | { ok: true; version: number }
+  | { ok: false; reason: "invalid" | "too-large" }
+  | ({ ok: false; reason: "conflict" } & WorkspaceSnapshot);
+
 function toPayload(themes: Theme[], activeThemeId: string): BoardPayload | null {
   return parseBoardPayload({ themes, activeThemeId });
-}
-
-async function upsertAsset(id: string, data: string) {
-  const sql = await getSql();
-  await sql`
-    insert into workspace_assets (id, data, updated_at)
-    values (${id}, ${data}, datetime('now'))
-    on conflict (id) do update
-      set data = excluded.data, updated_at = datetime('now')
-  `;
-}
-
-async function extractWhiteboardAssets(themes: Theme[]): Promise<Theme[]> {
-  let changed = false;
-  const next: Theme[] = [];
-  for (const theme of themes) {
-    let themeChanged = false;
-    const nodes = [];
-    for (const node of theme.whiteboard?.nodes ?? []) {
-      if (node.type !== "image" || !node.src.startsWith("data:image/")) {
-        nodes.push(node);
-        continue;
-      }
-      await upsertAsset(node.id, node.src);
-      themeChanged = true;
-      changed = true;
-      nodes.push({ ...node, src: `${ASSET_PREFIX}${node.id}` });
-    }
-    next.push(
-      themeChanged
-        ? { ...theme, whiteboard: { ...theme.whiteboard, nodes } }
-        : theme,
-    );
-  }
-  return changed ? next : themes;
-}
-
-async function hydrateWhiteboardAssets(themes: Theme[]): Promise<Theme[]> {
-  const ids: string[] = [];
-  for (const theme of themes) {
-    for (const node of theme.whiteboard?.nodes ?? []) {
-      if (node.type === "image" && node.src.startsWith(ASSET_PREFIX)) {
-        ids.push(node.src.slice(ASSET_PREFIX.length));
-      }
-    }
-  }
-  if (!ids.length) return themes;
-  try {
-    const sql = await getSql();
-    const rows = await sql<{ id: string; data: string }>`
-      select id, data from workspace_assets
-    `;
-    const map = new Map(rows.map((row) => [row.id, row.data]));
-    return themes.map((theme) => ({
-      ...theme,
-      whiteboard: {
-        ...theme.whiteboard,
-        nodes: (theme.whiteboard?.nodes ?? []).map((node) => {
-          if (node.type !== "image" || !node.src.startsWith(ASSET_PREFIX)) return node;
-          const data = map.get(node.src.slice(ASSET_PREFIX.length));
-          return data ? { ...node, src: data } : node;
-        }),
-      },
-    }));
-  } catch {
-    return themes;
-  }
-}
-
-async function readPayload(): Promise<BoardPayload | null> {
-  const sql = await getSql();
-  const rows = await sql<{ payload: string }>`
-    select payload from workspace where id = ${WORKSPACE_ID} limit 1
-  `;
-  const raw = rows[0]?.payload;
-  if (!raw) return null;
-  try {
-    const parsed = parseBoardPayload(JSON.parse(raw));
-    if (!parsed) return null;
-    return {
-      themes: await hydrateWhiteboardAssets(parsed.themes),
-      activeThemeId: parsed.activeThemeId,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function writePayload(payload: BoardPayload, previous?: string) {
-  const sql = await getSql();
-  const next = JSON.stringify(payload);
-  if (previous != null) {
-    const updated = await sql<{ id: string }>`
-      update workspace
-      set payload = ${next}, updated_at = datetime('now')
-      where id = ${WORKSPACE_ID} and payload = ${previous}
-      returning id
-    `;
-    return updated.length > 0;
-  }
-  await sql`
-    insert into workspace (id, payload, updated_at)
-    values (${WORKSPACE_ID}, ${next}, datetime('now'))
-    on conflict (id) do update
-      set payload = excluded.payload, updated_at = datetime('now')
-  `;
-  return true;
-}
-
-function assignInPayload(
-  payload: BoardPayload,
-  cardId: string,
-  name: string,
-): { card: Card; payload: BoardPayload } | null {
-  const current = findCardInThemes(payload.themes, cardId);
-  if (!current) return null;
-  const card: Card = { ...current, assignee: name };
-  return {
-    card,
-    payload: {
-      ...payload,
-      themes: payload.themes.map((theme) =>
-        theme.cards[cardId]
-          ? { ...theme, cards: { ...theme.cards, [cardId]: card } }
-          : theme,
-      ),
-    },
-  };
 }
 
 export const unlockWorkspace = createServerFn({ method: "POST" })
@@ -175,12 +54,8 @@ export const loadProfile = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { assertUnlock } = await import("@/lib/workspace-gate.server");
     await assertUnlock(data.token);
-    if (!data.deviceId) return { name: null };
-    const sql = await getSql();
-    const rows = await sql<{ name: string }>`
-      select name from profiles where user_id = ${data.deviceId} limit 1
-    `;
-    return { name: rows[0]?.name ?? null };
+    const { readProfileName } = await import("@/lib/workspace.server");
+    return readProfileName(data.deviceId);
   });
 
 export const saveProfile = createServerFn({ method: "POST" })
@@ -192,50 +67,51 @@ export const saveProfile = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { assertUnlock } = await import("@/lib/workspace-gate.server");
     await assertUnlock(data.token);
-    if (!data.deviceId || !data.name) return { name: null };
-    const sql = await getSql();
-    await sql`
-      insert into profiles (user_id, name, updated_at)
-      values (${data.deviceId}, ${data.name}, datetime('now'))
-      on conflict (user_id) do update
-        set name = excluded.name, updated_at = datetime('now')
-    `;
-    return { name: data.name };
+    const { writeProfileName } = await import("@/lib/workspace.server");
+    return writeProfileName(data.deviceId, data.name);
   });
 
 export const loadWorkspace = createServerFn({ method: "GET" })
-  .validator((data: { token: string }) => ({ token: data.token }))
+  .validator((data: { token: string; version?: number }) => ({
+    token: data.token,
+    version: typeof data.version === "number" && Number.isFinite(data.version) ? data.version : 0,
+  }))
+  .handler(async ({ data }): Promise<LoadWorkspaceResult> => {
+    const { assertUnlock } = await import("@/lib/workspace-gate.server");
+    await assertUnlock(data.token);
+    const { loadWorkspaceSnapshot } = await import("@/lib/workspace.server");
+    return loadWorkspaceSnapshot(data.version);
+  });
+
+export const saveWorkspace = createServerFn({ method: "POST" })
+  .validator((data: BoardPayload & { token: string; version?: number }) => {
+    const payload = toPayload(data.themes, data.activeThemeId);
+    if (!payload) return null;
+    return {
+      ...payload,
+      token: data.token,
+      version: typeof data.version === "number" && Number.isFinite(data.version) ? data.version : 0,
+    };
+  })
+  .handler(async ({ data }): Promise<SaveWorkspaceResult> => {
+    if (!data) return { ok: false, reason: "invalid" };
+    const { commitWorkspacePayload } = await import("@/lib/workspace.server");
+    return commitWorkspacePayload(data.themes, data.activeThemeId, data.token, data.version);
+  });
+
+export const loadWorkspaceAssets = createServerFn({ method: "POST" })
+  .validator((data: { ids: string[]; token: string }) => ({
+    ids: [...new Set(data.ids.map((id) => id.trim()).filter((id) => ASSET_ID.test(id)))].slice(
+      0,
+      80,
+    ),
+    token: data.token,
+  }))
   .handler(async ({ data }) => {
     const { assertUnlock } = await import("@/lib/workspace-gate.server");
     await assertUnlock(data.token);
-    return readPayload();
-  });
-
-export async function commitWorkspacePayload(
-  themes: Theme[],
-  activeThemeId: string,
-  token: string,
-) {
-  const { assertUnlock } = await import("@/lib/workspace-gate.server");
-  await assertUnlock(token);
-  const parsed = toPayload(themes, activeThemeId);
-  if (!parsed) return { ok: false as const };
-  const extracted = await extractWhiteboardAssets(parsed.themes);
-  await writePayload({
-    themes: extracted,
-    activeThemeId: parsed.activeThemeId,
-  });
-  return { ok: true as const };
-}
-
-export const saveWorkspace = createServerFn({ method: "POST" })
-  .validator((data: BoardPayload & { token: string }) => {
-    const payload = toPayload(data.themes, data.activeThemeId);
-    return payload ? { ...payload, token: data.token } : null;
-  })
-  .handler(async ({ data }) => {
-    if (!data) return { ok: false };
-    return commitWorkspacePayload(data.themes, data.activeThemeId, data.token);
+    const { readAssets } = await import("@/lib/workspace.server");
+    return readAssets(data.ids);
   });
 
 export const saveWorkspaceAsset = createServerFn({ method: "POST" })
@@ -247,11 +123,8 @@ export const saveWorkspaceAsset = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { assertUnlock } = await import("@/lib/workspace-gate.server");
     await assertUnlock(data.token);
-    if (!data.id || !data.data.startsWith("data:image/")) {
-      return { ok: false };
-    }
-    await upsertAsset(data.id, data.data);
-    return { ok: true };
+    const { saveAsset } = await import("@/lib/workspace.server");
+    return saveAsset(data.id, data.data);
   });
 
 export const claimAssignee = createServerFn({ method: "POST" })
@@ -263,47 +136,6 @@ export const claimAssignee = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { assertUnlock } = await import("@/lib/workspace-gate.server");
     await assertUnlock(data.token);
-    if (!data.cardId || !data.name) {
-      return { ok: false as const, reason: "invalid" as const, card: null, assignee: "" };
-    }
-    const sql = await getSql();
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const rows = await sql<{ payload: string }>`
-        select payload from workspace where id = ${WORKSPACE_ID} limit 1
-      `;
-      const raw = rows[0]?.payload;
-      if (!raw) {
-        return { ok: false as const, reason: "missing" as const, card: null, assignee: "" };
-      }
-      let parsed: BoardPayload | null = null;
-      try {
-        parsed = parseBoardPayload(JSON.parse(raw));
-      } catch {
-        parsed = null;
-      }
-      if (!parsed) {
-        return { ok: false as const, reason: "missing" as const, card: null, assignee: "" };
-      }
-      const existing = findCardInThemes(parsed.themes, data.cardId);
-      if (!existing) {
-        return { ok: false as const, reason: "missing" as const, card: null, assignee: "" };
-      }
-      if (existing.assignee && existing.assignee !== data.name) {
-        return {
-          ok: false as const,
-          reason: "taken" as const,
-          card: existing,
-          assignee: existing.assignee,
-        };
-      }
-      const next = assignInPayload(parsed, data.cardId, data.name);
-      if (!next) {
-        return { ok: false as const, reason: "missing" as const, card: null, assignee: "" };
-      }
-      const saved = await writePayload(next.payload, raw);
-      if (saved) {
-        return { ok: true as const, reason: "ok" as const, card: next.card, assignee: data.name };
-      }
-    }
-    return { ok: false as const, reason: "conflict" as const, card: null, assignee: "" };
+    const { claimCard } = await import("@/lib/workspace.server");
+    return claimCard(data.cardId, data.name);
   });

@@ -8,6 +8,7 @@ import { P2PRoom, type PeerInfo } from "./p2p";
 export interface UseP2PRoomOptions {
   room: string;
   name?: string;
+  enabled?: boolean;
 }
 
 export interface P2PRoomHandle {
@@ -26,6 +27,7 @@ export function useP2PRoom(options: UseP2PRoomOptions): P2PRoomHandle {
   const [selfId] = useState(() => `p-${Math.random().toString(36).slice(2, 10)}`);
   const [room] = useState(() => options.room);
   const [name] = useState(() => options.name ?? selfId);
+  const enabled = options.enabled !== false;
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [joined, setJoined] = useState(false);
   const roomRef = useRef<P2PRoom | null>(null);
@@ -34,6 +36,11 @@ export function useP2PRoom(options: UseP2PRoomOptions): P2PRoomHandle {
   );
 
   useEffect(() => {
+    if (!enabled) {
+      setJoined(false);
+      setPeers([]);
+      return;
+    }
     const p2p = new P2PRoom({
       room,
       selfId,
@@ -64,8 +71,10 @@ export function useP2PRoom(options: UseP2PRoomOptions): P2PRoomHandle {
     return () => {
       roomRef.current = null;
       p2p.close();
+      setJoined(false);
+      setPeers([]);
     };
-  }, [room, selfId, name]);
+  }, [room, selfId, name, enabled]);
 
   const broadcast = useCallback((data: unknown) => roomRef.current?.broadcast(data), []);
   const send = useCallback(

@@ -5,37 +5,38 @@ import { selectActiveTheme, useBoardStore } from "@/lib/kanban";
 import { cn } from "@/lib/utils";
 
 export function NoticeBar() {
-  const theme = useBoardStore(selectActiveTheme);
+  const themeId = useBoardStore((state) => selectActiveTheme(state).id);
+  const notice = useBoardStore((state) => selectActiveTheme(state).notice);
   const setThemeNotice = useBoardStore((state) => state.setThemeNotice);
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(theme.notice);
+  const [draft, setDraft] = useState(notice);
 
   useEffect(() => {
     setOpen(false);
-    setDraft((current) => (current === theme.notice ? current : theme.notice));
-  }, [theme.id]);
+    setDraft((current) => (current === notice ? current : notice));
+  }, [themeId]);
 
   useEffect(() => {
     if (open) return;
-    setDraft((current) => (current === theme.notice ? current : theme.notice));
-  }, [open, theme.notice]);
+    setDraft((current) => (current === notice ? current : notice));
+  }, [open, notice]);
 
   useEffect(() => {
     if (!open) return;
-    if (draft === theme.notice) return;
+    if (draft === notice) return;
     const timer = window.setTimeout(() => {
       setThemeNotice(draft);
     }, 280);
     return () => window.clearTimeout(timer);
-  }, [open, draft, theme.notice, setThemeNotice]);
+  }, [open, draft, notice, setThemeNotice]);
 
-  const hasText = theme.notice.trim().length > 0;
-  const preview = theme.notice.trim().split("\n")[0] ?? "";
+  const hasText = notice.trim().length > 0;
+  const preview = notice.trim().split("\n")[0] ?? "";
 
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-md bg-surface shadow-border",
+        "shrink-0 overflow-hidden rounded-md bg-surface shadow-border",
         hasText && "notice-unread",
       )}
     >

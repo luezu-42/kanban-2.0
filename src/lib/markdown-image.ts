@@ -5,17 +5,25 @@ const TARGET_CHARS = 160_000;
 const HARD_CHARS = 280_000;
 const DATA_URL_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
 
+export const MAX_ASSET_CHARS = 500_000;
+const ALLOWED_DATA_IMAGE = /^data:image\/(png|jpe?g|webp|gif);base64,/i;
+
+export function isAllowedImageDataUrl(src: string) {
+  return (
+    ALLOWED_DATA_IMAGE.test(src) &&
+    src.length <= MAX_ASSET_CHARS &&
+    !src.startsWith("data:image/svg")
+  );
+}
+
 export function isImageFile(file: File) {
-  return file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(file.name);
+  if (file.type === "image/svg+xml" || /\.svg$/i.test(file.name)) return false;
+  return file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name);
 }
 
 export async function fileToDataUrl(file: File): Promise<string> {
   if (!isImageFile(file)) {
-    throw new Error("Choose an image file.");
-  }
-
-  if (file.type === "image/svg+xml") {
-    return readAsDataUrl(file);
+    throw new Error("Choose a PNG, JPEG, WebP, or GIF image.");
   }
 
   if (file.type === "image/gif" && file.size < 280_000) {
@@ -89,7 +97,27 @@ export async function compactThemeImages(themes: Theme[]): Promise<Theme[]> {
   const compacted: Theme[] = [];
   for (const theme of next) {
     const board = theme.whiteboard;
-    if (!board?.nodes.length) {
+    if (!board) {
+      compacted.push(theme);
+      continue;
+    }
+    if (board.format === "excalidraw") {
+      const files = { ...board.files };
+      let boardChanged = false;
+      for (const [id, file] of Object.entries(board.files)) {
+        if (!file.src.startsWith("data:image/")) continue;
+        const src = await optimizeDataUrl(file.src);
+        if (src === file.src) continue;
+        files[id] = { ...file, src };
+        boardChanged = true;
+        changed = true;
+      }
+      compacted.push(
+        boardChanged ? { ...theme, whiteboard: { ...board, files } } : theme,
+      );
+      continue;
+    }
+    if (!board.nodes.length) {
       compacted.push(theme);
       continue;
     }

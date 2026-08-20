@@ -26,8 +26,11 @@ import {
   useBoardStore,
 } from "@/lib/kanban";
 import { cn } from "@/lib/utils";
+import { downloadThemeCsv } from "@/lib/board-export";
 import { downloadDoneCsv } from "@/lib/done-csv";
 import { errorMessage } from "@/lib/errors";
+import { usePresence } from "@/lib/presence";
+import { useProfileStore } from "@/lib/profile";
 
 export function ThemeTabs() {
   const themes = useBoardStore((state) => state.themes);
@@ -36,6 +39,9 @@ export function ThemeTabs() {
   const addTheme = useBoardStore((state) => state.addTheme);
   const renameTheme = useBoardStore((state) => state.renameTheme);
   const deleteTheme = useBoardStore((state) => state.deleteTheme);
+  const activeName = themes.find((theme) => theme.id === activeThemeId)?.name ?? "Board";
+  const name = useProfileStore((state) => state.name) ?? "Guest";
+  const presence = usePresence({ name, themeName: activeName, enabled: true });
 
   const [form, setForm] = useState<ThemeFormState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Theme | null>(null);
@@ -65,7 +71,7 @@ export function ThemeTabs() {
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <div
           role="tablist"
           aria-label="Themes"
@@ -74,28 +80,64 @@ export function ThemeTabs() {
           {themes.map((theme) => {
             const selected = theme.id === activeThemeId;
             const count = themeCardCount(theme);
+            const reviewCount = theme.order.review.length;
+            const needsReview = reviewCount > 0;
+            const here = presence.peers.filter((peer) => peer.themeName === theme.name);
             return (
               <div
                 key={theme.id}
                 className={cn(
-                  "flex shrink-0 items-center rounded-lg transition-[background-color,color,box-shadow] duration-150",
+                  "relative flex shrink-0 items-center rounded-lg transition-[background-color,color,box-shadow] duration-150",
                   selected
                     ? "bg-surface text-fg shadow-border"
                     : "text-muted hover:bg-surface/60 hover:text-fg",
+                  needsReview && !selected && "bg-review/10 text-fg",
+                  needsReview && "theme-tab-review",
                 )}
               >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={selected}
+                  aria-label={
+                    needsReview
+                      ? `${theme.name}, ${count} cards, ${reviewCount} in Review`
+                      : undefined
+                  }
                   id={`theme-tab-${theme.id}`}
+                  title={needsReview ? `${reviewCount} in Review` : undefined}
                   onClick={() => setActiveTheme(theme.id)}
                   className="h-11 whitespace-nowrap px-3 text-left text-sm font-medium"
                 >
-                  <span>{theme.name}</span>
+                  <span className="relative inline-block pr-2">
+                    {theme.name}
+                    {needsReview ? (
+                      <span
+                        className="notice-unread-dot absolute top-0 right-0 size-2 rounded-full bg-review"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </span>
                   <span className="ml-2 font-mono text-xs text-subtle tabular-nums">
                     {count}
                   </span>
+                  {needsReview ? (
+                    <span className="ml-1.5 font-mono text-xs text-review tabular-nums">
+                      {reviewCount}
+                    </span>
+                  ) : null}
+                  {here.length ? (
+                    <span className="ml-2 inline-flex items-center" title={here.map((peer) => peer.name).join(", ")}>
+                      {here.slice(0, 3).map((peer) => (
+                        <span
+                          key={peer.id}
+                          className="-ml-1 grid size-5 place-items-center rounded-full bg-bg text-[0.6rem] font-semibold text-fg shadow-border first:ml-0"
+                        >
+                          {peer.name.slice(0, 1).toUpperCase()}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
                 </button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -139,6 +181,23 @@ export function ThemeTabs() {
                     >
                       <Download className="size-4" />
                       Download Done CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        try {
+                          const exported = downloadThemeCsv(theme);
+                          if (!exported) {
+                            toast.error("No cards in this theme to export.");
+                            return;
+                          }
+                          toast.success(`Downloaded ${exported} cards.`);
+                        } catch (error) {
+                          toast.error(errorMessage(error, "Could not export the CSV."));
+                        }
+                      }}
+                    >
+                      <Download className="size-4" />
+                      Export theme CSV
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       variant="destructive"

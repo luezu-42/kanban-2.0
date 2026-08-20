@@ -1,17 +1,15 @@
 import { optimizeDataUrl } from "@/lib/markdown-image";
 
-export const WHITEBOARD_TOOLS = [
-  "select",
-  "pan",
-  "pen",
-  "text",
-  "rect",
-  "ellipse",
-  "diamond",
-  "arrow",
-] as const;
+export const ASSET_PREFIX = "asset:";
+export const ASSET_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
-export type WhiteboardTool = (typeof WHITEBOARD_TOOLS)[number];
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 export type WhiteboardNode =
   | {
@@ -53,21 +51,55 @@ export type WhiteboardConnector = {
   to: string;
 };
 
-export type WhiteboardDoc = {
+export type WhiteboardFile = {
+  id: string;
+  mimeType: string;
+  created: number;
+  src: string;
+};
+
+export type WhiteboardAppState = {
+  viewBackgroundColor?: string;
+  scrollX?: number;
+  scrollY?: number;
+  zoom?: { value: number };
+  gridSize?: number | null;
+};
+
+export type ExcalidrawWhiteboard = {
+  format: "excalidraw";
+  elements: JsonValue[];
+  appState: WhiteboardAppState;
+  files: Record<string, WhiteboardFile>;
+};
+
+export type LegacyWhiteboard = {
+  format: "legacy";
   nodes: WhiteboardNode[];
   connectors: WhiteboardConnector[];
 };
 
-export type Box = { x: number; y: number; w: number; h: number };
-export type Point = { x: number; y: number };
-export type Side = "n" | "e" | "s" | "w";
+export type WhiteboardDoc = ExcalidrawWhiteboard | LegacyWhiteboard;
 
-export const ASSET_PREFIX = "asset:";
+export const EMPTY_WHITEBOARD: ExcalidrawWhiteboard = {
+  format: "excalidraw",
+  elements: [],
+  appState: {},
+  files: {},
+};
 
-export const EMPTY_WHITEBOARD: WhiteboardDoc = { nodes: [], connectors: [] };
-
-export function emptyWhiteboard(): WhiteboardDoc {
+export function emptyWhiteboard(): ExcalidrawWhiteboard {
   return EMPTY_WHITEBOARD;
+}
+
+export function isLegacyWhiteboard(doc: WhiteboardDoc): doc is LegacyWhiteboard {
+  return doc.format === "legacy";
+}
+
+export function isExcalidrawWhiteboard(
+  doc: WhiteboardDoc,
+): doc is ExcalidrawWhiteboard {
+  return doc.format === "excalidraw";
 }
 
 export function isWhiteboardImageSrc(src: string) {
@@ -78,21 +110,96 @@ export function whiteboardImageId(src: string, fallback: string) {
   return src.startsWith(ASSET_PREFIX) ? src.slice(ASSET_PREFIX.length) : fallback;
 }
 
+export function whiteboardFileAssetId(fileId: string) {
+  if (ASSET_ID_RE.test(fileId)) return fileId;
+  const compact = fileId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  if (ASSET_ID_RE.test(compact)) return compact;
+  let hash = 5381;
+  for (let i = 0; i < fileId.length; i += 1) {
+    hash = (hash * 33) ^ fileId.charCodeAt(i);
+  }
+  return `f${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+export function listWhiteboardImages(doc: WhiteboardDoc): Array<{ id: string; src: string }> {
+  if (isLegacyWhiteboard(doc)) {
+    const images: Array<{ id: string; src: string }> = [];
+    for (const node of doc.nodes) {
+      if (node.type === "image") images.push({ id: node.id, src: node.src });
+    }
+    return images;
+  }
+  return Object.values(doc.files).map((file) => ({ id: file.id, src: file.src }));
+}
+
+export function replaceWhiteboardImages(
+  doc: WhiteboardDoc,
+  srcById: Map<string, string>,
+): WhiteboardDoc {
+  if (isLegacyWhiteboard(doc)) {
+    const nodes: WhiteboardNode[] = [];
+    for (const node of doc.nodes) {
+      if (node.type !== "image") {
+        nodes.push(node);
+        continue;
+      }
+      const src = srcById.get(node.id);
+      if (!src) continue;
+      nodes.push(src === node.src ? node : { ...node, src });
+    }
+    return { ...doc, nodes };
+  }
+  const files: Record<string, WhiteboardFile> = {};
+  for (const [key, file] of Object.entries(doc.files)) {
+    const src = srcById.get(file.id) ?? srcById.get(key);
+    if (!src) continue;
+    files[key] = src === file.src ? file : { ...file, src };
+  }
+  return { ...doc, files };
+}
+
+export function whiteboardContentSignature(doc: WhiteboardDoc) {
+  if (isLegacyWhiteboard(doc)) return whiteboardSignature(doc);
+  return whiteboardSignature({ ...doc, appState: {} });
+}
+
 export function whiteboardSignature(doc: WhiteboardDoc) {
+  if (isLegacyWhiteboard(doc)) {
+    return JSON.stringify({
+      format: "legacy",
+      connectors: doc.connectors,
+      nodes: doc.nodes.map((node) =>
+        node.type === "image"
+          ? { ...node, src: node.src.length }
+          : node.type === "path"
+            ? { ...node, points: node.points.length }
+            : node,
+      ),
+    });
+  }
   return JSON.stringify({
-    connectors: doc.connectors,
-    nodes: doc.nodes.map((node) =>
-      node.type === "image"
-        ? { ...node, src: node.src.length }
-        : node.type === "path"
-          ? { ...node, points: node.points.length }
-          : node,
-    ),
+    format: "excalidraw",
+    appState: doc.appState,
+    elements: doc.elements.map((item) => elementSignature(item)),
+    files: Object.values(doc.files).map((file) => [
+      file.id,
+      file.mimeType,
+      file.src.startsWith("data:") ? file.src.length : file.src,
+    ]),
   });
 }
 
-function nid() {
-  return crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+function elementSignature(item: unknown) {
+  if (!item || typeof item !== "object") return item;
+  const {
+    version: _version,
+    versionNonce: _versionNonce,
+    updated: _updated,
+    seed: _seed,
+    index: _index,
+    ...rest
+  } = item as Record<string, unknown>;
+  return rest;
 }
 
 function num(value: unknown, fallback = 0) {
@@ -112,11 +219,10 @@ function pointsOf(raw: unknown): [number, number][] {
   return next;
 }
 
-export function normalizeWhiteboard(raw: unknown): WhiteboardDoc {
-  if (!raw || typeof raw !== "object") return emptyWhiteboard();
-  const value = raw as Partial<WhiteboardDoc>;
+function normalizeLegacyNodes(raw: unknown): WhiteboardNode[] {
+  if (!Array.isArray(raw)) return [];
   const nodes: WhiteboardNode[] = [];
-  for (const item of Array.isArray(value.nodes) ? value.nodes : []) {
+  for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const node = item as {
       type?: string;
@@ -157,11 +263,7 @@ export function normalizeWhiteboard(raw: unknown): WhiteboardDoc {
       });
       continue;
     }
-    if (
-      node.type === "image" &&
-      typeof node.src === "string" &&
-      isWhiteboardImageSrc(node.src)
-    ) {
+    if (node.type === "image" && typeof node.src === "string" && isWhiteboardImageSrc(node.src)) {
       nodes.push({ ...box, type: "image", id: node.id, src: node.src });
       continue;
     }
@@ -169,9 +271,16 @@ export function normalizeWhiteboard(raw: unknown): WhiteboardDoc {
       nodes.push({ ...box, type: node.type, id: node.id });
     }
   }
-  const ids = new Set(nodes.map((node) => node.id));
+  return nodes;
+}
+
+function normalizeLegacyConnectors(
+  raw: unknown,
+  ids: Set<string>,
+): WhiteboardConnector[] {
+  if (!Array.isArray(raw)) return [];
   const connectors: WhiteboardConnector[] = [];
-  for (const item of Array.isArray(value.connectors) ? value.connectors : []) {
+  for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const link = item as Partial<WhiteboardConnector>;
     if (typeof link.id !== "string" || !link.id) continue;
@@ -180,217 +289,147 @@ export function normalizeWhiteboard(raw: unknown): WhiteboardDoc {
     if (!ids.has(link.from) || !ids.has(link.to)) continue;
     connectors.push({ id: link.id, from: link.from, to: link.to });
   }
-  return { nodes, connectors };
+  return connectors;
 }
 
-export function nodeBox(node: WhiteboardNode): Box {
-  if (node.type === "path") {
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const [x, y] of node.points) {
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
+function toJsonValue(value: unknown): JsonValue | undefined {
+  try {
+    return JSON.parse(JSON.stringify(value)) as JsonValue;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeElements(raw: unknown): JsonValue[] {
+  if (!Array.isArray(raw)) return [];
+  const elements: JsonValue[] = [];
+  for (const item of raw) {
+    const json = toJsonValue(item);
+    if (!json || typeof json !== "object" || Array.isArray(json)) continue;
+    const el = json as { id?: unknown; type?: unknown; isDeleted?: unknown };
+    if (typeof el.id !== "string" || !el.id) continue;
+    if (typeof el.type !== "string" || !el.type) continue;
+    if (el.isDeleted === true) continue;
+    elements.push(json);
+  }
+  return elements;
+}
+
+function normalizeAppState(raw: unknown): WhiteboardAppState {
+  if (!raw || typeof raw !== "object") return {};
+  const value = raw as Record<string, unknown>;
+  const next: WhiteboardAppState = {};
+  if (typeof value.viewBackgroundColor === "string") {
+    next.viewBackgroundColor = value.viewBackgroundColor;
+  }
+  if (typeof value.scrollX === "number" && Number.isFinite(value.scrollX)) {
+    next.scrollX = value.scrollX;
+  }
+  if (typeof value.scrollY === "number" && Number.isFinite(value.scrollY)) {
+    next.scrollY = value.scrollY;
+  }
+  if (value.zoom && typeof value.zoom === "object") {
+    const zoomValue = (value.zoom as { value?: unknown }).value;
+    if (typeof zoomValue === "number" && Number.isFinite(zoomValue) && zoomValue > 0) {
+      next.zoom = { value: zoomValue };
     }
-    return {
-      x: minX - 8,
-      y: minY - 8,
-      w: Math.max(16, maxX - minX + 16),
-      h: Math.max(16, maxY - minY + 16),
+  }
+  if (value.gridSize === null) next.gridSize = null;
+  else if (typeof value.gridSize === "number" && Number.isFinite(value.gridSize)) {
+    next.gridSize = value.gridSize;
+  }
+  return next;
+}
+
+function normalizeFiles(raw: unknown): Record<string, WhiteboardFile> {
+  if (!raw || typeof raw !== "object") return {};
+  const files: Record<string, WhiteboardFile> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const item = value as {
+      id?: unknown;
+      mimeType?: unknown;
+      created?: unknown;
+      src?: unknown;
+      dataURL?: unknown;
+    };
+    const id = typeof item.id === "string" && item.id ? item.id : key;
+    const src =
+      typeof item.src === "string"
+        ? item.src
+        : typeof item.dataURL === "string"
+          ? item.dataURL
+          : "";
+    if (!id || !isWhiteboardImageSrc(src)) continue;
+    files[id] = {
+      id,
+      mimeType: typeof item.mimeType === "string" && item.mimeType ? item.mimeType : "image/png",
+      created: typeof item.created === "number" && Number.isFinite(item.created) ? item.created : 0,
+      src,
     };
   }
-  return { x: node.x, y: node.y, w: node.w, h: node.h };
+  return files;
 }
 
-export function hitNode(nodes: WhiteboardNode[], point: Point): WhiteboardNode | null {
-  for (let i = nodes.length - 1; i >= 0; i -= 1) {
-    const node = nodes[i]!;
-    if (node.type === "path") {
-      for (let p = 1; p < node.points.length; p += 1) {
-        const a = node.points[p - 1]!;
-        const b = node.points[p]!;
-        if (distanceToSegment(point, { x: a[0], y: a[1] }, { x: b[0], y: b[1] }) <= 10) {
-          return node;
-        }
-      }
-      continue;
-    }
-    const box = nodeBox(node);
-    if (
-      point.x >= box.x &&
-      point.x <= box.x + box.w &&
-      point.y >= box.y &&
-      point.y <= box.y + box.h
-    ) {
-      return node;
-    }
-  }
-  return null;
-}
-
-function distanceToSegment(point: Point, a: Point, b: Point) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = dx * dx + dy * dy;
-  if (len === 0) return Math.hypot(point.x - a.x, point.y - a.y);
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / len));
-  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
-}
-
-function sidePoint(box: Box, side: Side): Point {
-  if (side === "n") return { x: box.x + box.w / 2, y: box.y };
-  if (side === "s") return { x: box.x + box.w / 2, y: box.y + box.h };
-  if (side === "w") return { x: box.x, y: box.y + box.h / 2 };
-  return { x: box.x + box.w, y: box.y + box.h / 2 };
-}
-
-function bestSides(from: Box, to: Box): [Side, Side] {
-  const sides: Side[] = ["n", "e", "s", "w"];
-  let best: [Side, Side] = ["e", "w"];
-  let score = Infinity;
-  for (const a of sides) {
-    for (const b of sides) {
-      const pa = sidePoint(from, a);
-      const pb = sidePoint(to, b);
-      const d = Math.hypot(pb.x - pa.x, pb.y - pa.y);
-      if (d < score) {
-        score = d;
-        best = [a, b];
-      }
-    }
-  }
-  return best;
-}
-
-function control(point: Point, side: Side, distance: number): Point {
-  if (side === "n") return { x: point.x, y: point.y - distance };
-  if (side === "s") return { x: point.x, y: point.y + distance };
-  if (side === "w") return { x: point.x - distance, y: point.y };
-  return { x: point.x + distance, y: point.y };
-}
-
-export function connectorGeometry(from: WhiteboardNode, to: WhiteboardNode) {
-  const a = nodeBox(from);
-  const b = nodeBox(to);
-  const [fromSide, toSide] = bestSides(a, b);
-  const start = sidePoint(a, fromSide);
-  const end = sidePoint(b, toSide);
-  const span = Math.max(48, Math.hypot(end.x - start.x, end.y - start.y) / 3);
-  const c1 = control(start, fromSide, span);
-  const c2 = control(end, toSide, span);
-  return {
-    d: `M ${start.x} ${start.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${end.x} ${end.y}`,
-    end,
-    angle: Math.atan2(end.y - c2.y, end.x - c2.x),
+export function normalizeWhiteboard(raw: unknown): WhiteboardDoc {
+  if (!raw || typeof raw !== "object") return emptyWhiteboard();
+  const value = raw as {
+    format?: unknown;
+    elements?: unknown;
+    appState?: unknown;
+    files?: unknown;
+    nodes?: unknown;
+    connectors?: unknown;
   };
-}
-
-export function moveNode(node: WhiteboardNode, dx: number, dy: number): WhiteboardNode {
-  if (node.type === "path") {
+  if (value.format === "excalidraw" || Array.isArray(value.elements)) {
     return {
-      ...node,
-      points: node.points.map(([x, y]) => [x + dx, y + dy] as [number, number]),
+      format: "excalidraw",
+      elements: normalizeElements(value.elements),
+      appState: normalizeAppState(value.appState),
+      files: normalizeFiles(value.files),
     };
   }
-  return { ...node, x: node.x + dx, y: node.y + dy };
-}
-
-export function resizeNode(node: WhiteboardNode, box: Box): WhiteboardNode {
-  if (node.type === "path") return node;
+  const nodes = normalizeLegacyNodes(value.nodes);
+  if (!nodes.length) return emptyWhiteboard();
   return {
-    ...node,
-    x: box.x,
-    y: box.y,
-    w: Math.max(32, box.w),
-    h: Math.max(28, box.h),
-  };
-}
-
-export function createShape(
-  type: "rect" | "ellipse" | "diamond" | "text",
-  a: Point,
-  b: Point,
-): WhiteboardNode {
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  const w = Math.max(36, Math.abs(b.x - a.x));
-  const h = Math.max(36, Math.abs(b.y - a.y));
-  if (type === "text") {
-    return { type: "text", id: nid(), x, y, w: Math.max(w, 160), h: Math.max(h, 56), text: "" };
-  }
-  return { type, id: nid(), x, y, w, h };
-}
-
-export function createPath(points: [number, number][]): WhiteboardNode | null {
-  if (points.length < 2) return null;
-  return { type: "path", id: nid(), points, width: 2.4 };
-}
-
-export function createImage(src: string, at: Point, width: number, height: number): WhiteboardNode {
-  const max = 420;
-  const scale = Math.min(1, max / Math.max(width, height, 1));
-  const w = Math.max(80, width * scale);
-  const h = Math.max(80, height * scale);
-  return { type: "image", id: nid(), x: at.x - w / 2, y: at.y - h / 2, w, h, src };
-}
-
-export function createConnector(from: string, to: string): WhiteboardConnector | null {
-  if (!from || !to || from === to) return null;
-  return { id: nid(), from, to };
-}
-
-export function removeNode(doc: WhiteboardDoc, id: string): WhiteboardDoc {
-  return {
-    nodes: doc.nodes.filter((node) => node.id !== id),
-    connectors: doc.connectors.filter((link) => link.from !== id && link.to !== id),
-  };
-}
-
-export function upsertNode(doc: WhiteboardDoc, node: WhiteboardNode): WhiteboardDoc {
-  const index = doc.nodes.findIndex((item) => item.id === node.id);
-  if (index < 0) return { ...doc, nodes: [...doc.nodes, node] };
-  const nodes = doc.nodes.slice();
-  nodes[index] = node;
-  return { ...doc, nodes };
-}
-
-export async function compactWhiteboard(doc: WhiteboardDoc): Promise<WhiteboardDoc> {
-  const nodes: WhiteboardNode[] = [];
-  let changed = false;
-  for (const node of doc.nodes) {
-    if (node.type !== "image" || !node.src.startsWith("data:image/")) {
-      nodes.push(node);
-      continue;
-    }
-    const src = await optimizeDataUrl(node.src);
-    if (src !== node.src) changed = true;
-    nodes.push({ ...node, src });
-  }
-  return changed ? { ...doc, nodes } : doc;
-}
-
-export function stripWhiteboardDataUrls(doc: WhiteboardDoc): WhiteboardDoc {
-  return {
-    ...doc,
-    nodes: doc.nodes.map((node) =>
-      node.type === "image" && node.src.startsWith("data:image/")
-        ? { ...node, src: `${ASSET_PREFIX}${node.id}` }
-        : node,
+    format: "legacy",
+    nodes,
+    connectors: normalizeLegacyConnectors(
+      value.connectors,
+      new Set(nodes.map((node) => node.id)),
     ),
   };
 }
 
-export function simplifyPoints(points: [number, number][], min = 2): [number, number][] {
-  if (points.length < 3) return points;
-  const next: [number, number][] = [points[0]!];
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const prev = next[next.length - 1]!;
-    const cur = points[i]!;
-    if (Math.hypot(cur[0] - prev[0], cur[1] - prev[1]) >= min) next.push(cur);
+export async function compactWhiteboard(doc: WhiteboardDoc): Promise<WhiteboardDoc> {
+  const images = listWhiteboardImages(doc);
+  if (!images.length) return doc;
+  let changed = false;
+  const nextSrc = new Map<string, string>();
+  for (const image of images) {
+    if (!image.src.startsWith("data:image/")) {
+      nextSrc.set(image.id, image.src);
+      continue;
+    }
+    const src = await optimizeDataUrl(image.src);
+    if (src !== image.src) changed = true;
+    nextSrc.set(image.id, src);
   }
-  next.push(points[points.length - 1]!);
-  return next;
+  return changed ? replaceWhiteboardImages(doc, nextSrc) : doc;
+}
+
+export function stripWhiteboardDataUrls(doc: WhiteboardDoc): WhiteboardDoc {
+  const images = listWhiteboardImages(doc);
+  if (!images.length) return doc;
+  let changed = false;
+  const nextSrc = new Map<string, string>();
+  for (const image of images) {
+    if (image.src.startsWith("data:image/")) {
+      nextSrc.set(image.id, `${ASSET_PREFIX}${whiteboardFileAssetId(image.id)}`);
+      changed = true;
+    } else {
+      nextSrc.set(image.id, image.src);
+    }
+  }
+  return changed ? replaceWhiteboardImages(doc, nextSrc) : doc;
 }

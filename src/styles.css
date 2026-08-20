@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@fontsource-variable/figtree/wght.css";
+@import "@fontsource-variable/newsreader/wght.css";
 
 @theme {
   --color-bg: var(--ledger-bg);
@@ -21,6 +23,7 @@
   --color-done: var(--ledger-done);
   --color-danger: var(--ledger-danger);
   --color-urgent: var(--ledger-urgent);
+  --color-waiting: var(--ledger-waiting);
   --color-jira: var(--ledger-jira);
   --color-jira-fg: var(--ledger-jira-fg);
   --color-ring: var(--ledger-ring);
@@ -37,8 +40,8 @@
   --color-popover: var(--ledger-bg-elevated);
   --color-popover-foreground: var(--ledger-fg);
 
-  --font-sans: "Figtree", "Segoe UI", system-ui, sans-serif;
-  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Figtree Variable", "Figtree", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Newsreader Variable", "Newsreader", "Iowan Old Style", Georgia, serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --radius: 0.75rem;
@@ -54,6 +57,9 @@
 
   --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  --breakpoint-wide: 100rem;
+  --breakpoint-qhd: 160rem;
 }
 
 :root,
@@ -73,6 +79,7 @@ html[data-theme="dark"] {
   --ledger-backlog: #8a847c;
   --ledger-planning: #c4a06a;
   --ledger-todo: #6a98b8;
+  --ledger-waiting: #6a98b8;
   --ledger-doing: #5b7fd4;
   --ledger-review: #9b84c4;
   --ledger-done: #6fad7a;
@@ -106,6 +113,7 @@ html[data-theme="light"] {
   --ledger-backlog: #7a746c;
   --ledger-planning: #b8893a;
   --ledger-todo: #3f7ea8;
+  --ledger-waiting: #3f7ea8;
   --ledger-doing: #3d64c4;
   --ledger-review: #7a5aa6;
   --ledger-done: #3e8a52;
@@ -139,6 +147,7 @@ html[data-theme="soft"] {
   --ledger-backlog: #a39a8c;
   --ledger-planning: #c4a06a;
   --ledger-todo: #7a9cb0;
+  --ledger-waiting: #7a9cb0;
   --ledger-doing: #6a88c4;
   --ledger-review: #9a84b8;
   --ledger-done: #6aaa7c;
@@ -206,6 +215,17 @@ html[data-theme="soft"] {
     -ms-overflow-style: none;
   }
 
+  @media (min-width: 160rem) {
+    .details-frame {
+      inset: 4rem auto !important;
+      top: 4rem !important;
+      bottom: 4rem !important;
+      left: 50% !important;
+      width: min(90rem, calc(100vw - 8rem));
+      transform: translateX(-50%) !important;
+    }
+  }
+
   .board-scroller::-webkit-scrollbar {
     display: none;
   }
@@ -238,12 +258,45 @@ html[data-theme="soft"] {
     animation: notice-unread-dot 1.4s ease-in-out infinite;
   }
 
+  .theme-tab-review {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-review) 55%, transparent),
+      0 8px 20px -14px color-mix(in oklab, var(--ledger-review) 55%, transparent);
+    animation: theme-tab-review 1.8s var(--ease-smooth-out) infinite;
+  }
+
   .pr-alert-card {
     background: color-mix(in oklab, var(--ledger-urgent) 22%, var(--ledger-surface));
     box-shadow:
       0 0 0 1px color-mix(in oklab, var(--ledger-urgent) 55%, transparent),
       0 10px 28px -16px rgb(0 0 0 / 0.55);
     animation: pr-alert-pulse 1.8s var(--ease-smooth-out) infinite;
+  }
+
+  .excalidraw-host,
+  .excalidraw-host .excalidraw {
+    width: 100%;
+    height: 100%;
+  }
+
+  .waiting-banner-scroll {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 0.75rem,
+      #000 calc(100% - 0.75rem),
+      transparent
+    );
+  }
+
+  .waiting-marquee {
+    display: flex;
+    width: max-content;
+    animation: waiting-marquee var(--waiting-marquee-duration, 12s) linear infinite;
+  }
+
+  .waiting-banner:hover .waiting-marquee {
+    animation-play-state: paused;
   }
 }
 
@@ -287,6 +340,29 @@ html[data-theme="soft"] {
   }
 }
 
+@keyframes theme-tab-review {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-review) 45%, transparent),
+      0 8px 20px -14px color-mix(in oklab, var(--ledger-review) 40%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--ledger-review) 85%, transparent),
+      0 0 18px color-mix(in oklab, var(--ledger-review) 28%, transparent);
+  }
+}
+
+@keyframes waiting-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
 @keyframes pr-alert-pulse {
   0%,
   100% {
@@ -307,9 +383,11 @@ html[data-theme="soft"] {
   .pr-alert-card,
   .notice-unread,
   .notice-unread-dot,
+  .theme-tab-review,
   .block-link-draw,
   .block-link-flow,
-  .block-link-pulse {
+  .block-link-pulse,
+  .waiting-marquee {
     transition: none !important;
     animation: none !important;
   }

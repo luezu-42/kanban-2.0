@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { boardSignature, useBoardStore } from "@/lib/kanban";
+import {
+  collectAssetIdsFromThemes,
+  ensureAssets,
+  fetchAssetRows,
+} from "@/lib/asset-cache";
+import { boardSignature, useBoardStore, type Theme } from "@/lib/kanban";
 import { compactThemeImages } from "@/lib/markdown-image";
 import { SYNC_RETRY_EVENT, errorMessage, isOffline } from "@/lib/errors";
 import {
@@ -10,8 +15,12 @@ import {
 } from "@/lib/sync-queue";
 import { useSyncStatus } from "@/lib/sync-status";
 import { getUnlockToken } from "@/lib/unlock";
-import { loadWorkspace, saveWorkspace } from "@/lib/workspace";
-import { stashWhiteboardImages } from "@/lib/whiteboard-persist";
+import {
+  getServerVersion,
+  rememberServerVersion,
+} from "@/lib/workspace-version";
+import { loadWorkspace, loadWorkspaceAssets, saveWorkspace } from "@/lib/workspace";
+import { stashBoardAssets } from "@/lib/whiteboard-persist";
 
 function token() {
   return getUnlockToken();
@@ -20,6 +29,20 @@ function token() {
 function currentBoard() {
   const { themes, activeThemeId } = useBoardStore.getState();
   return { themes, activeThemeId };
+}
+
+async function hydrateAssets(themes: Theme[]) {
+  const token = getUnlockToken();
+  if (!token) return;
+  await ensureAssets(collectAssetIdsFromThemes(themes), async (ids) => {
+    const fromHttp = await fetchAssetRows(ids, token);
+    if (fromHttp.length === ids.length) return fromHttp;
+    const have = new Set(fromHttp.map((row) => row.id));
+    const rest = ids.filter((id) => !have.has(id));
+    if (!rest.length) return fromHttp;
+    const fallback = await loadWorkspaceAssets({ data: { ids: rest, token } });
+    return [...fromHttp, ...fallback];
+  });
 }
 
 export function BoardSync() {
@@ -75,14 +98,28 @@ export function BoardSync() {
       const unlock = token();
       let queuedThemes = latest.themes;
       try {
-        queuedThemes = await stashWhiteboardImages(latest.themes, unlock);
-        await saveWorkspace({
+        queuedThemes = await stashBoardAssets(latest.themes, unlock);
+        const result = await saveWorkspace({
           data: {
             themes: queuedThemes,
             activeThemeId: latest.activeThemeId,
             token: unlock,
+            version: getServerVersion(),
           },
         });
+        if (result && "reason" in result && result.reason === "conflict") {
+          rememberServerVersion(result.version);
+          useBoardStore.getState().replaceBoard(result.themes, result.activeThemeId);
+          lastApplied.current = boardSignature(result.themes, result.activeThemeId);
+          await hydrateAssets(result.themes);
+          dirty.current = false;
+          void clearWorkspaceSync();
+          setHealth("ok", "Board updated elsewhere. Reloaded the latest version.");
+          toast.message("Board updated elsewhere");
+          return;
+        }
+        if (!result?.ok) throw new Error("Could not save the workspace.");
+        rememberServerVersion(result.version);
         if (!cancelled) {
           dirty.current = false;
           lastApplied.current = boardSignature(latest.themes, latest.activeThemeId);
@@ -97,6 +134,7 @@ export function BoardSync() {
               token: unlock,
               themes: queuedThemes,
               activeThemeId: latest.activeThemeId,
+              version: getServerVersion(),
             });
             markFail(error, true);
           } catch (queueError) {
@@ -130,10 +168,21 @@ export function BoardSync() {
           const local = currentBoard();
           lastApplied.current = boardSignature(local.themes, local.activeThemeId);
         }
-        const remote = await loadWorkspace({ data: { token: token() } });
+        const remote = await loadWorkspace({
+          data: { token: token(), version: getServerVersion() },
+        });
         if (cancelled || dirty.current) return;
         applying.current = true;
-        if (remote) {
+        if (remote.status === "unchanged") {
+          rememberServerVersion(remote.version);
+        } else if (remote.status === "delta") {
+          rememberServerVersion(remote.version);
+          useBoardStore.getState().applyDelta(remote);
+          const latest = currentBoard();
+          lastApplied.current = boardSignature(latest.themes, latest.activeThemeId);
+          await hydrateAssets(latest.themes);
+        } else if (remote.status === "ok") {
+          rememberServerVersion(remote.version);
           let themes = remote.themes;
           if (!compacted.current) {
             themes = await compactThemeImages(remote.themes);
@@ -144,15 +193,18 @@ export function BoardSync() {
             useBoardStore.getState().replaceBoard(themes, remote.activeThemeId);
             lastApplied.current = signature;
           }
+          await hydrateAssets(themes);
           if (themes !== remote.themes) {
-            const persisted = await stashWhiteboardImages(themes, token());
-            await saveWorkspace({
+            const persisted = await stashBoardAssets(themes, token());
+            const saved = await saveWorkspace({
               data: {
                 themes: persisted,
                 activeThemeId: remote.activeThemeId,
                 token: token(),
+                version: getServerVersion(),
               },
             });
+            if (saved.ok) rememberServerVersion(saved.version);
           }
         } else {
           const local = currentBoard();
@@ -163,14 +215,17 @@ export function BoardSync() {
           if (themes !== local.themes) {
             useBoardStore.getState().replaceBoard(themes, local.activeThemeId);
           }
-          await saveWorkspace({
+          const saved = await saveWorkspace({
             data: {
-              themes: await stashWhiteboardImages(themes, token()),
+              themes: await stashBoardAssets(themes, token()),
               activeThemeId: local.activeThemeId,
               token: token(),
+              version: getServerVersion(),
             },
           });
+          if (saved.ok) rememberServerVersion(saved.version);
           lastApplied.current = boardSignature(themes, local.activeThemeId);
+          await hydrateAssets(themes);
         }
         if (!cancelled) markOk();
       } catch (error) {
@@ -205,6 +260,7 @@ export function BoardSync() {
         token: token(),
         themes: latest.themes,
         activeThemeId: latest.activeThemeId,
+        version: getServerVersion(),
       });
       void flush();
     };

@@ -7778,14 +7778,6 @@ function formatAction(action) {
 function capitalizeFirstLetter(str) {
 	return str.charAt(0).toUpperCase() + str.slice(1);
 }
-var WORD_PATTERN = /[\p{Ll}\d]+|\p{Lu}+(?!\p{Ll})|\p{Lu}[\p{Ll}\d]+|\p{Lo}+/gu;
-var APOSTROPHE_PATTERN = /['\u2019]/g;
-function splitWords(input) {
-	return input.replace(APOSTROPHE_PATTERN, "").match(WORD_PATTERN) ?? [];
-}
-function toKebabCase(input) {
-	return splitWords(input).map((word) => word.toLowerCase()).join("-");
-}
 //#endregion
 //#region node_modules/zod/v4/core/core.js
 var _a$1;
@@ -9559,6 +9551,62 @@ var $ZodUnion = /*@__PURE__*/ $constructor("$ZodUnion", (inst, def) => {
 		});
 	};
 });
+var $ZodDiscriminatedUnion = /*@__PURE__*/ $constructor("$ZodDiscriminatedUnion", (inst, def) => {
+	def.inclusive = false;
+	$ZodUnion.init(inst, def);
+	const _super = inst._zod.parse;
+	defineLazy(inst._zod, "propValues", () => {
+		const propValues = {};
+		for (const option of def.options) {
+			const pv = option._zod.propValues;
+			if (!pv || Object.keys(pv).length === 0) throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(option)}"`);
+			for (const [k, v] of Object.entries(pv)) {
+				if (!propValues[k]) propValues[k] = /* @__PURE__ */ new Set();
+				for (const val of v) propValues[k].add(val);
+			}
+		}
+		return propValues;
+	});
+	const disc = cached$1(() => {
+		const opts = def.options;
+		const map = /* @__PURE__ */ new Map();
+		for (const o of opts) {
+			const values = o._zod.propValues?.[def.discriminator];
+			if (!values || values.size === 0) throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(o)}"`);
+			for (const v of values) {
+				if (map.has(v)) throw new Error(`Duplicate discriminator value "${String(v)}"`);
+				map.set(v, o);
+			}
+		}
+		return map;
+	});
+	inst._zod.parse = (payload, ctx) => {
+		const input = payload.value;
+		if (!isObject$1(input)) {
+			payload.issues.push({
+				code: "invalid_type",
+				expected: "object",
+				input,
+				inst
+			});
+			return payload;
+		}
+		const opt = disc.value.get(input?.[def.discriminator]);
+		if (opt) return opt._zod.run(payload, ctx);
+		if (def.unionFallback || ctx.direction === "backward") return _super(payload, ctx);
+		payload.issues.push({
+			code: "invalid_union",
+			errors: [],
+			note: "No matching discriminator",
+			discriminator: def.discriminator,
+			options: Array.from(disc.value.keys()),
+			input,
+			path: [def.discriminator],
+			inst
+		});
+		return payload;
+	};
+});
 var $ZodIntersection = /*@__PURE__*/ $constructor("$ZodIntersection", (inst, def) => {
 	$ZodType.init(inst, def);
 	inst._zod.parse = (payload, ctx) => {
@@ -10367,6 +10415,15 @@ function _isoDuration(Class, params) {
 function _number(Class, params) {
 	return new Class({
 		type: "number",
+		checks: [],
+		...normalizeParams(params)
+	});
+}
+// @__NO_SIDE_EFFECTS__
+function _coercedNumber(Class, params) {
+	return new Class({
+		type: "number",
+		coerce: true,
 		checks: [],
 		...normalizeParams(params)
 	});
@@ -11792,6 +11849,18 @@ function union(options, params) {
 	return new ZodUnion({
 		type: "union",
 		options,
+		...normalizeParams(params)
+	});
+}
+var ZodDiscriminatedUnion = /*@__PURE__*/ $constructor("ZodDiscriminatedUnion", (inst, def) => {
+	ZodUnion.init(inst, def);
+	$ZodDiscriminatedUnion.init(inst, def);
+});
+function discriminatedUnion(discriminator, options, params) {
+	return new ZodDiscriminatedUnion({
+		type: "union",
+		options,
+		discriminator,
 		...normalizeParams(params)
 	});
 }
@@ -14813,35 +14882,6 @@ function normalizePathname(requestUrl, basePath) {
 	if (pathname.startsWith(normalizedBasePath + "/")) return pathname.slice(normalizedBasePath.length).replace(/\/+$/, "") || "/";
 	return pathname;
 }
-/**
-* Schemes that execute or embed code when navigated to or accepted as a
-* redirect target. These are never safe as an OAuth `redirect_uri` or as a
-* client-side navigation target (`window.location.href`, `location.assign`, ...).
-*/
-var DANGEROUS_URL_SCHEMES = [
-	"javascript:",
-	"data:",
-	"vbscript:"
-];
-/**
-* Returns `false` only when `value` is an absolute URL using a dangerous scheme
-* (`javascript:`, `data:`, `vbscript:`). Relative URLs (e.g. `/dashboard`) and
-* safe absolute schemes (`http`, `https`, custom app schemes such as
-* `myapp://`) return `true`.
-*
-* Use this to guard browser navigation sinks and any redirect target that may
-* originate from untrusted input. It is intentionally narrow: it blocks code
-* execution schemes without rejecting relative paths or mobile deep links.
-*/
-function isSafeUrlScheme(value) {
-	let parsed;
-	try {
-		parsed = new URL(value);
-	} catch {
-		return true;
-	}
-	return !DANGEROUS_URL_SCHEMES.includes(parsed.protocol);
-}
 //#endregion
 //#region node_modules/@better-auth/core/dist/utils/deprecate.mjs
 /**
@@ -15656,95 +15696,6 @@ var methods = [
 	"patch",
 	"delete"
 ];
-var applySchemaPlugin = (config) => ({
-	id: "apply-schema",
-	name: "Apply Schema",
-	version: "1.0.0",
-	async init(url, options) {
-		var _a, _b, _c, _d;
-		const schema = ((_b = (_a = config.plugins) == null ? void 0 : _a.find((plugin) => {
-			var _a2;
-			return ((_a2 = plugin.schema) == null ? void 0 : _a2.config) ? url.startsWith(plugin.schema.config.baseURL || "") || url.startsWith(plugin.schema.config.prefix || "") : false;
-		})) == null ? void 0 : _b.schema) || config.schema;
-		if (schema) {
-			let urlKey = url;
-			if ((_c = schema.config) == null ? void 0 : _c.prefix) {
-				if (urlKey.startsWith(schema.config.prefix)) {
-					urlKey = urlKey.replace(schema.config.prefix, "");
-					if (schema.config.baseURL) url = url.replace(schema.config.prefix, schema.config.baseURL);
-				}
-			}
-			if ((_d = schema.config) == null ? void 0 : _d.baseURL) {
-				if (urlKey.startsWith(schema.config.baseURL)) urlKey = urlKey.replace(schema.config.baseURL, "");
-			}
-			if (urlKey.startsWith("/") && urlKey.charAt(1) === "@") urlKey = urlKey.substring(1);
-			const keySchema = schema.schema[urlKey];
-			if (keySchema) {
-				let validatedHeaders = options == null ? void 0 : options.headers;
-				if (keySchema.headers && !(options == null ? void 0 : options.disableValidation)) {
-					const normalizedHeaders = {};
-					if (options == null ? void 0 : options.headers) {
-						if (options.headers instanceof Headers) options.headers.forEach((value, key) => {
-							normalizedHeaders[key.toLowerCase()] = value;
-						});
-						else if (typeof options.headers === "object") {
-							for (const [key, value] of Object.entries(options.headers)) if (value !== null && value !== void 0) normalizedHeaders[key.toLowerCase()] = value;
-						}
-					}
-					const validated = await parseStandardSchema(keySchema.headers, normalizedHeaders);
-					const finalHeaders = {};
-					for (const [key, value] of Object.entries(validated)) finalHeaders[key.toLowerCase()] = value;
-					validatedHeaders = finalHeaders;
-				}
-				let opts = __spreadProps(__spreadValues({}, options), {
-					method: keySchema.method,
-					output: keySchema.output,
-					headers: validatedHeaders
-				});
-				if (!(options == null ? void 0 : options.disableValidation)) opts = __spreadProps(__spreadValues({}, opts), {
-					body: keySchema.input ? await parseStandardSchema(keySchema.input, options == null ? void 0 : options.body) : options == null ? void 0 : options.body,
-					params: keySchema.params ? await parseStandardSchema(keySchema.params, options == null ? void 0 : options.params) : options == null ? void 0 : options.params,
-					query: keySchema.query ? await parseStandardSchema(keySchema.query, options == null ? void 0 : options.query) : options == null ? void 0 : options.query
-				});
-				return {
-					url,
-					options: opts
-				};
-			}
-		}
-		return {
-			url,
-			options
-		};
-	}
-});
-var createFetch = (config) => {
-	async function $fetch(url, options) {
-		const opts = __spreadProps(__spreadValues(__spreadValues({}, config), options), {
-			headers: mergeHeaders(config == null ? void 0 : config.headers, options == null ? void 0 : options.headers),
-			plugins: [
-				...(config == null ? void 0 : config.plugins) || [],
-				applySchemaPlugin(config || {}),
-				...(options == null ? void 0 : options.plugins) || []
-			]
-		});
-		if (config == null ? void 0 : config.catchAllError) try {
-			return await betterFetch(url, opts);
-		} catch (error) {
-			return {
-				data: null,
-				error: {
-					status: 500,
-					statusText: "Fetch Error",
-					message: "Fetch related error. Captured by catchAllError option. See error property for more details.",
-					error
-				}
-			};
-		}
-		return await betterFetch(url, opts);
-	}
-	return $fetch;
-};
 var isReservedPathSegment = (value) => value === "." || value === "..";
 function encodePathSegment(segment, pathParams) {
 	let pathSegment = segment;
@@ -18987,4 +18938,4 @@ var socialProviders = {
 };
 var SocialProviderListEnum = _enum(Object.keys(socialProviders)).or(string());
 //#endregion
-export { isDisjoint as $, runWithAdapter as $t, base64Url as A, email as At, validateAlgorithms as B, _coercedString as Bt, runWithEndpointContext as C, uint32be as Ct, serializeSignedCookie as D, any as Dt, serializeCookie as E, ZodString as Et, validateClaimsSet as F, optional as Ft, prepareKey as G, ATTR_CONTEXT as Gt, validateCritDuplicates as H, toKebabCase as Ht, jwsAlgorithm as I, record as It, decodeBase64url as J, import_src as Jt, jwkToKey as K, ATTR_HOOK_TYPE as Kt, sign as L, string as Lt, decodeProtectedHeader as M, looseObject as Mt, jwtVerify as N, number as Nt, filterOutputFields as O, array as Ot, JWTClaimsBuilder as P, object as Pt, unprotected as Q, queueAfterTransactionHook as Qt, JWE_RECOGNIZED as R, union as Rt, getCurrentAuthContext as S, encode$1 as St, toResponse as T, ZodBoolean as Tt, jweAlgorithm as U, createAdapterFactory as Ut, validateCrit as V, capitalizeFirstLetter as Vt, jweEncryption as W, withSpan as Wt, encodeBase64url as X, getAuthTables as Xt, digest as Y, safeJSONParse as Yt, parseJoseHeader as Z, getCurrentAdapter as Zt, createAuthMiddleware as _, BetterAuthError as _n, checkCryptoKey as _t, betterFetch as a, createRandomStringGenerator as an, isKeyLike as at, hasRequestState as b, defineErrorCodes as bn, concat as bt, applyDefaultAccessTokenExpiry as c, shouldPublishLog as cn, JOSENotSupported as ct, findInvalidTrustedProxies as d, getBooleanEnvVar as dn, JWKInvalid as dt, runWithTransaction as en, isJWK as et, getIp as f, getEnvVar as fn, JWSInvalid as ft, createAuthEndpoint as g, APIError as gn, invalidKeyInput as gt, normalizePathname as h, isTest as hn, JWTInvalid as ht, refreshAccessToken as i, generateId as in, isCryptoKey as it, decodeJwt as j, literal as jt, base64 as k, boolean as kt, isLoopbackHost as l, ENV as ln, JWEDecryptionFailed as lt, isSafeUrlScheme as m, isProduction as mn, JWTExpired as mt, socialProviders as n, initGetModelName as nn, encode as nt, createFetch as o, createLogger as on, isKeyObject as ot, deprecate as p, isDevelopment as pn, JWTClaimValidationFailed as pt, assertNotSet as q, ATTR_OPERATION_ID as qt, validateAuthorizationCode as r, initGetFieldName as rn, assertCryptoKey as rt, createAuthorizationURL as s, logger as sn, JOSEAlgNotAllowed as st, SocialProviderListEnum as t, getBetterAuthVersion as tn, isObject as tt, createRateLimitKey as u, env as un, JWEInvalid as ut, isAPIError as v, kAPIErrorHeaderSymbol as vn, checkModulusLength as vt, createRouter$1 as w, uint64be as wt, runWithRequestState as x, decoder as xt, defineRequestState as y, BASE_ERROR_CODES as yn, checkUsage as yt, JWS_RECOGNIZED as z, _coercedBoolean as zt };
+export { isObject as $, getCurrentAdapter as $t, decodeProtectedHeader as A, discriminatedUnion as At, validateCritDuplicates as B, unknown as Bt, toResponse as C, ZodBoolean as Ct, base64 as D, any as Dt, filterOutputFields as E, _enum as Et, sign as F, object as Ft, assertNotSet as G, createAdapterFactory as Gt, jweEncryption as H, _coercedNumber as Ht, JWE_RECOGNIZED as I, optional as It, encodeBase64url as J, ATTR_HOOK_TYPE as Jt, decodeBase64url as K, withSpan as Kt, JWS_RECOGNIZED as L, record as Lt, JWTClaimsBuilder as M, literal as Mt, validateClaimsSet as N, looseObject as Nt, base64Url as O, array as Ot, jwsAlgorithm as P, number as Pt, isJWK as Q, getAuthTables as Qt, validateAlgorithms as R, string as Rt, createRouter$1 as S, defineErrorCodes as Sn, uint64be as St, serializeSignedCookie as T, ZodString as Tt, prepareKey as U, _coercedString as Ut, jweAlgorithm as V, _coercedBoolean as Vt, jwkToKey as W, capitalizeFirstLetter as Wt, unprotected as X, import_src as Xt, parseJoseHeader as Y, ATTR_OPERATION_ID as Yt, isDisjoint as Z, safeJSONParse as Zt, defineRequestState as _, isTest as _n, checkUsage as _t, betterFetch as a, initGetFieldName as an, JOSEAlgNotAllowed as at, getCurrentAuthContext as b, kAPIErrorHeaderSymbol as bn, encode$1 as bt, isLoopbackHost as c, createLogger as cn, JWEInvalid as ct, getIp as d, ENV as dn, JWTClaimValidationFailed as dt, queueAfterTransactionHook as en, encode as et, deprecate as f, env as fn, JWTExpired as ft, isAPIError as g, isProduction as gn, checkModulusLength as gt, createAuthMiddleware as h, isDevelopment as hn, checkCryptoKey as ht, refreshAccessToken as i, initGetModelName as in, isKeyObject as it, jwtVerify as j, email as jt, decodeJwt as k, boolean as kt, createRateLimitKey as l, logger as ln, JWKInvalid as lt, createAuthEndpoint as m, getEnvVar as mn, invalidKeyInput as mt, socialProviders as n, runWithTransaction as nn, isCryptoKey as nt, createAuthorizationURL as o, generateId as on, JOSENotSupported as ot, normalizePathname as p, getBooleanEnvVar as pn, JWTInvalid as pt, digest as q, ATTR_CONTEXT as qt, validateAuthorizationCode as r, getBetterAuthVersion as rn, isKeyLike as rt, applyDefaultAccessTokenExpiry as s, createRandomStringGenerator as sn, JWEDecryptionFailed as st, SocialProviderListEnum as t, runWithAdapter as tn, assertCryptoKey as tt, findInvalidTrustedProxies as u, shouldPublishLog as un, JWSInvalid as ut, hasRequestState as v, APIError as vn, concat as vt, serializeCookie as w, ZodNumber as wt, runWithEndpointContext as x, BASE_ERROR_CODES as xn, uint32be as xt, runWithRequestState as y, BetterAuthError as yn, decoder as yt, validateCrit as z, union as zt };

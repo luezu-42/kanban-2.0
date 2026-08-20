@@ -14,20 +14,22 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { LayoutGrid, PenLine } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { BlockLinks } from "@/components/block-links";
 import { BlockReasonDialog } from "@/components/block-reason-dialog";
-import { CardDetailsDialog } from "@/components/card-details-dialog";
+import { WaitingNoteDialog } from "@/components/waiting-note-dialog";
 import { CardFormDialog, type CardFormState } from "@/components/card-form-dialog";
 import { CardLinkDialog, type CardLinkState } from "@/components/card-link-dialog";
 import { CardFace } from "@/components/kanban-card";
 import { KanbanColumn } from "@/components/kanban-column";
 import { ThemeTabs, ThemeTabsSkeleton } from "@/components/theme-tabs";
 import { NoticeBar } from "@/components/notice-bar";
-import { WhiteboardCanvas } from "@/components/whiteboard-canvas";
 import { WorkflowStrip } from "@/components/workflow-strip";
+import { BoardSearch } from "@/components/board-search";
+import { ShortcutHelp } from "@/components/shortcut-help";
+
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -41,6 +43,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   COLUMNS,
+  COLUMN_IDS,
   type Card,
   type CardLinkKind,
   type ColumnId,
@@ -54,6 +57,16 @@ import {
 } from "@/lib/kanban";
 import { useProfileStore } from "@/lib/profile";
 import { useReviewLive } from "@/lib/review-live";
+import { BOARD_EVENT, typingInField } from "@/lib/board-events";
+import { attachBoardHistory, redoBoard, undoBoard } from "@/lib/board-history";
+import type { CardHit } from "@/lib/card-search";
+
+const CardDetailsDialog = lazy(() =>
+  import("@/components/card-details-dialog").then((mod) => ({ default: mod.CardDetailsDialog })),
+);
+const WhiteboardCanvas = lazy(() =>
+  import("@/components/whiteboard-canvas").then((mod) => ({ default: mod.WhiteboardCanvas })),
+);
 
 const POINTER_SENSOR = { activationConstraint: { distance: 6 } };
 const TOUCH_SENSOR = { activationConstraint: { delay: 160, tolerance: 6 } };
@@ -67,7 +80,13 @@ const dropAnimation = {
   }),
 };
 
-export function KanbanBoard() {
+export function KanbanBoard({
+  canvasOpen,
+  onCanvasOpenChange,
+}: {
+  canvasOpen: boolean;
+  onCanvasOpenChange: (open: boolean) => void;
+}) {
   const [ready, setReady] = useState(false);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   const [overColumn, setOverColumn] = useState<ColumnId | null>(null);
@@ -81,7 +100,10 @@ export function KanbanBoard() {
   } | null>(null);
   const [pendingPrAlert, setPendingPrAlert] = useState<Card | null>(null);
   const [pendingBlock, setPendingBlock] = useState<Card | null>(null);
-  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [pendingWaiting, setPendingWaiting] = useState<Card | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
 
   const theme = useBoardStore(selectActiveTheme);
@@ -96,6 +118,7 @@ export function KanbanBoard() {
   const applyUrgencySort = useBoardStore((state) => state.applyUrgencySort);
   const setCardPrAlert = useBoardStore((state) => state.setCardPrAlert);
   const setCardBlock = useBoardStore((state) => state.setCardBlock);
+  const setCardWaiting = useBoardStore((state) => state.setCardWaiting);
   const reviewSound = useProfileStore((state) => state.reviewSound);
   const setReviewSound = useProfileStore((state) => state.setReviewSound);
   const { publishEnter, publishLeave, publishPrAlert } = useReviewLive();
@@ -105,7 +128,7 @@ export function KanbanBoard() {
   const candidates = useMemo(() => listThemeCards(theme), [theme]);
   const linkLayoutKey = useMemo(
     () =>
-      `${theme.id}:${JSON.stringify(order)}:${Object.values(cards)
+      `${theme.id}:${COLUMN_IDS.map((id) => order[id].join(",")).join("|")}:${Object.values(cards)
         .map((card) => `${card.id}:${card.blocked}:${card.blockedBy.join(",")}`)
         .join("|")}`,
     [theme.id, order, cards],
@@ -115,12 +138,149 @@ export function KanbanBoard() {
     let cancelled = false;
     const result = useBoardStore.persist.rehydrate();
     void Promise.resolve(result).then(() => {
-      if (!cancelled) setReady(true);
+      if (cancelled) return;
+      attachBoardHistory();
+      setReady(true);
     });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!focusedCardId) return;
+    const node = document.querySelector(`[data-card-id="${focusedCardId}"]`);
+    node?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [focusedCardId]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
+      if (typingInField(event.target)) return;
+      const meta = event.metaKey || event.ctrlKey;
+      if (meta && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          if (redoBoard()) toast("Redone");
+        } else if (undoBoard()) {
+          toast("Undone");
+        }
+        return;
+      }
+      if (meta && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        if (redoBoard()) toast("Redone");
+        return;
+      }
+      if (
+        searchOpen ||
+        helpOpen ||
+        form ||
+        detailsCard ||
+        linkForm ||
+        canvasOpen ||
+        pendingBlock ||
+        pendingWaiting
+      ) {
+        if (event.key === "Escape") {
+          setSearchOpen(false);
+          setHelpOpen(false);
+        }
+        return;
+      }
+      if (event.key === "/" && !event.shiftKey) {
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setHelpOpen(true);
+        return;
+      }
+      if (event.key.toLowerCase() === "c" && !meta) {
+        event.preventDefault();
+        setForm({ mode: "create", columnId: "backlog" });
+        return;
+      }
+      if (event.key.toLowerCase() === "z" && !meta) {
+        event.preventDefault();
+        if (undoBoard()) toast("Undone");
+        return;
+      }
+      if (event.key.toLowerCase() === "u" && !meta) {
+        event.preventDefault();
+        if (undoBoard()) toast("Undone");
+        return;
+      }
+      if (event.key.toLowerCase() === "r" && !meta && event.shiftKey) {
+        event.preventDefault();
+        if (redoBoard()) toast("Redone");
+        return;
+      }
+      const ids = listThemeCards(selectActiveTheme(useBoardStore.getState())).map(
+        (card) => card.id,
+      );
+      if (!ids.length) return;
+      if (event.key === "j" || event.key === "ArrowDown") {
+        event.preventDefault();
+        setFocusedCardId((current) => {
+          const index = current ? ids.indexOf(current) : -1;
+          return ids[Math.min(ids.length - 1, index + 1)] ?? ids[0]!;
+        });
+        return;
+      }
+      if (event.key === "k" || event.key === "ArrowUp") {
+        event.preventDefault();
+        setFocusedCardId((current) => {
+          const index = current ? ids.indexOf(current) : ids.length;
+          return ids[Math.max(0, index - 1)] ?? ids[0]!;
+        });
+        return;
+      }
+      if (event.key === "Enter" && focusedCardId) {
+        const card = selectActiveTheme(useBoardStore.getState()).cards[focusedCardId];
+        if (card) {
+          event.preventDefault();
+          setDetailsCard(card);
+        }
+      }
+    }
+    function onSearch() {
+      setSearchOpen(true);
+    }
+    function onUndo() {
+      if (undoBoard()) toast("Undone");
+    }
+    function onRedo() {
+      if (redoBoard()) toast("Redone");
+    }
+    function onHelp() {
+      setHelpOpen(true);
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener(BOARD_EVENT.search, onSearch);
+    window.addEventListener(BOARD_EVENT.undo, onUndo);
+    window.addEventListener(BOARD_EVENT.redo, onRedo);
+    window.addEventListener(BOARD_EVENT.help, onHelp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(BOARD_EVENT.search, onSearch);
+      window.removeEventListener(BOARD_EVENT.undo, onUndo);
+      window.removeEventListener(BOARD_EVENT.redo, onRedo);
+      window.removeEventListener(BOARD_EVENT.help, onHelp);
+    };
+  }, [
+    searchOpen,
+    helpOpen,
+    form,
+    detailsCard,
+    linkForm,
+    canvasOpen,
+    pendingBlock,
+    pendingWaiting,
+    focusedCardId,
+  ]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, POINTER_SENSOR),
@@ -206,6 +366,8 @@ export function KanbanBoard() {
     blocked: boolean;
     urgent: boolean;
     blockedBy: string[];
+    waiting: boolean;
+    waitingNote: string;
   }) {
     if (!form) return;
     if (form.mode === "create") {
@@ -214,6 +376,8 @@ export function KanbanBoard() {
         blocked: values.blocked,
         urgent: values.urgent,
         blockedBy: values.blockedBy,
+        waiting: values.waiting,
+        waitingNote: values.waitingNote,
       });
       toast.success("Card added");
       return;
@@ -222,11 +386,11 @@ export function KanbanBoard() {
     toast.success("Card updated");
   }
 
-  function handleDelete(card: Card) {
+  const handleDelete = useCallback((card: Card) => {
     setPendingDelete(card);
-  }
+  }, []);
 
-  function handleToggleFlag(card: Card, flag: "blocked" | "urgent") {
+  const handleToggleFlag = useCallback((card: Card, flag: "blocked" | "urgent" | "waiting") => {
     if (flag === "blocked") {
       if (card.blocked) {
         setCardBlock(card.id, false, []);
@@ -236,14 +400,18 @@ export function KanbanBoard() {
       setPendingBlock(card);
       return;
     }
+    if (flag === "waiting") {
+      setPendingWaiting(card);
+      return;
+    }
     toggleCardFlag(card.id, flag);
     const next = !card.urgent;
     toast(next ? "Marked urgent" : "Urgent cleared");
-  }
+  }, [setCardBlock, toggleCardFlag]);
 
-  function handleEditLink(card: Card, kind: CardLinkKind) {
+  const handleEditLink = useCallback((card: Card, kind: CardLinkKind) => {
     setLinkForm({ card, kind });
-  }
+  }, []);
 
   function handleLinkSubmit(url: string) {
     if (!linkForm) return;
@@ -265,8 +433,8 @@ export function KanbanBoard() {
     toast.success("Details saved");
   }
 
-  function handleSendTo(card: Card, columnId: ColumnId) {
-    const from = findColumnOf(order, card.id);
+  const handleSendTo = useCallback((card: Card, columnId: ColumnId) => {
+    const from = findColumnOf(selectActiveTheme(useBoardStore.getState()).order, card.id);
     if (!from) return;
     if (columnId === "review") {
       if (from === "review") return;
@@ -288,7 +456,7 @@ export function KanbanBoard() {
         block: "nearest",
       });
     });
-  }
+  }, [publishLeave, sendCardTo]);
 
   function confirmReviewMove() {
     if (!pendingReview) return;
@@ -336,7 +504,7 @@ export function KanbanBoard() {
 
   if (!ready) {
     return (
-      <div className="flex flex-col gap-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:gap-3">
         <ThemeTabsSkeleton />
         <div className="h-11 w-full animate-pulse rounded-md bg-surface" />
         <BoardSkeleton />
@@ -346,21 +514,25 @@ export function KanbanBoard() {
 
   return (
     <>
-      <div className="flex flex-col gap-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:gap-3">
         <ThemeTabs />
         <NoticeBar />
-        <div className="flex items-center">
+        <div className="flex shrink-0 items-center">
           <Button
             type="button"
             variant={canvasOpen ? "secondary" : "outline"}
-            onClick={() => setCanvasOpen((open) => !open)}
+            onClick={() => onCanvasOpenChange(!canvasOpen)}
           >
             {canvasOpen ? <LayoutGrid className="size-4" /> : <PenLine className="size-4" />}
             {canvasOpen ? "Show board" : "Open canvas"}
           </Button>
         </div>
         {canvasOpen ? (
-          <WhiteboardCanvas onClose={() => setCanvasOpen(false)} />
+          <div className="flex min-h-80 flex-1 flex-col xl:min-h-0">
+          <Suspense fallback={<div className="h-80 flex-1 animate-pulse rounded-xl bg-bg-elevated" />}>
+            <WhiteboardCanvas onClose={() => onCanvasOpenChange(false)} />
+          </Suspense>
+          </div>
         ) : (
           <>
         <WorkflowStrip counts={counts} onSelect={scrollToColumn} />
@@ -375,7 +547,7 @@ export function KanbanBoard() {
           <div
             key={theme.id}
             ref={boardRef}
-            className="board-scroller relative flex snap-x snap-mandatory items-start gap-3 overflow-x-auto pb-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
+            className="board-scroller relative flex snap-x snap-mandatory items-start gap-3 overflow-x-auto pb-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200 xl:gap-3 xl:overflow-x-hidden xl:snap-none wide:gap-4"
           >
             <BlockLinks
               cards={cards}
@@ -403,6 +575,8 @@ export function KanbanBoard() {
                 onPrAlert={setPendingPrAlert}
                 soundOn={reviewSound}
                 onSoundToggle={() => setReviewSound(!reviewSound)}
+                virtualize={!activeCard && !focusedCardId}
+                focusedCardId={focusedCardId}
               />
             ))}
           </div>
@@ -411,7 +585,7 @@ export function KanbanBoard() {
             ? createPortal(
                 <DragOverlay dropAnimation={dropAnimation}>
                   {activeCard ? (
-                    <div className="w-[min(100vw-2.5rem,19.5rem)]">
+                    <div className="w-[min(100vw-2.5rem,19.5rem)] xl:w-80">
                       <CardFace
                         card={activeCard}
                         overlay
@@ -447,14 +621,28 @@ export function KanbanBoard() {
         onSubmit={handleLinkSubmit}
       />
 
-      <CardDetailsDialog
-        open={detailsCard !== null}
-        card={detailsCard}
-        onOpenChange={(open) => {
-          if (!open) setDetailsCard(null);
+      <BoardSearch
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onPick={(hit: CardHit) => {
+          useBoardStore.getState().setActiveTheme(hit.themeId);
+          setFocusedCardId(hit.card.id);
+          setDetailsCard(hit.card);
         }}
-        onSave={handleDetailsSave}
       />
+      <ShortcutHelp open={helpOpen} onOpenChange={setHelpOpen} />
+      {detailsCard ? (
+        <Suspense fallback={null}>
+          <CardDetailsDialog
+            open
+            card={detailsCard}
+            onOpenChange={(open) => {
+              if (!open) setDetailsCard(null);
+            }}
+            onSave={handleDetailsSave}
+          />
+        </Suspense>
+      ) : null}
 
       <BlockReasonDialog
         open={pendingBlock !== null}
@@ -468,6 +656,25 @@ export function KanbanBoard() {
           setCardBlock(pendingBlock.id, true, blockedBy);
           setPendingBlock(null);
           toast("Marked blocked");
+        }}
+      />
+      <WaitingNoteDialog
+        open={pendingWaiting !== null}
+        card={pendingWaiting}
+        onOpenChange={(open) => {
+          if (!open) setPendingWaiting(null);
+        }}
+        onConfirm={(note) => {
+          if (!pendingWaiting) return;
+          setCardWaiting(pendingWaiting.id, true, note);
+          setPendingWaiting(null);
+          toast("Marked waiting");
+        }}
+        onClear={() => {
+          if (!pendingWaiting) return;
+          setCardWaiting(pendingWaiting.id, false, "");
+          setPendingWaiting(null);
+          toast("Waiting cleared");
         }}
       />
       <AlertDialog
@@ -553,7 +760,7 @@ function BoardSkeleton() {
       {COLUMNS.map((column) => (
         <div
           key={column.id}
-          className="h-72 w-[85vw] min-w-[85vw] shrink-0 animate-pulse rounded-xl bg-bg-elevated shadow-border md:w-72 md:min-w-72"
+          className="h-72 w-[85vw] min-w-[85vw] shrink-0 animate-pulse rounded-xl bg-bg-elevated shadow-border md:h-80 md:w-64 md:min-w-64 xl:h-auto xl:min-h-0 xl:w-auto xl:flex-1"
         />
       ))}
     </div>

@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ChevronsDownUp, ChevronsUpDown, Plus, Volume2, VolumeX } from "lucide-react";
 import { KanbanCard } from "@/components/kanban-card";
+import { VirtualCardList } from "@/components/virtual-card-list";
 import { Button } from "@/components/ui/button";
 import {
   type Card,
@@ -37,16 +38,18 @@ type KanbanColumnProps = {
   onAdd: (columnId: ColumnId) => void;
   onEdit: (card: Card) => void;
   onDelete: (card: Card) => void;
-  onToggleFlag: (card: Card, flag: "blocked" | "urgent") => void;
+  onToggleFlag: (card: Card, flag: "blocked" | "urgent" | "waiting") => void;
   onSendTo: (card: Card, columnId: ColumnId) => void;
   onEditLink: (card: Card, kind: CardLinkKind) => void;
   onOpenDetails: (card: Card) => void;
   onPrAlert: (card: Card) => void;
   soundOn?: boolean;
   onSoundToggle?: () => void;
+  virtualize?: boolean;
+  focusedCardId?: string | null;
 };
 
-export function KanbanColumn({
+export const KanbanColumn = memo(function KanbanColumn({
   id,
   title,
   hint,
@@ -65,6 +68,8 @@ export function KanbanColumn({
   onPrAlert,
   soundOn,
   onSoundToggle,
+  virtualize = false,
+  focusedCardId = null,
 }: KanbanColumnProps) {
   const droppableData = useMemo(
     () => ({ type: "column" as const, columnId: id }),
@@ -87,12 +92,14 @@ export function KanbanColumn({
       id={`column-${id}`}
       className={cn(
         "flex w-[85vw] min-w-[85vw] shrink-0 flex-col rounded-xl bg-bg-elevated p-3 snap-center",
-        "md:w-72 md:min-w-72",
+        "md:w-64 md:min-w-64",
+        "xl:w-auto xl:min-w-0 xl:flex-1 xl:snap-align-none",
+        id === "done" && "max-h-[min(70vh,42rem)] min-h-0",
         "transition-[box-shadow,background-color] duration-200 ease-[var(--ease-smooth-out)]",
         isOver ? "shadow-lift" : "shadow-border",
       )}
     >
-      <header className="flex items-start justify-between gap-3 px-1 pt-1 pb-3">
+      <header className="flex shrink-0 items-start justify-between gap-3 px-1 pt-1 pb-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className={cn("size-2 shrink-0 rounded-full", TONE[id])} />
@@ -168,30 +175,44 @@ export function KanbanColumn({
         ref={setNodeRef}
         className={cn(
           "flex min-h-32 flex-col gap-2.5 rounded-lg p-0.5",
-          id === "done" && "gap-1.5",
+          id === "done" && "min-h-0 flex-1 gap-1.5",
           isOver && "bg-surface/40",
         )}
       >
-        <SortableContext
-          items={sortableIds}
-          strategy={verticalListSortingStrategy}
+        <VirtualCardList
+          count={visibleCards.length}
+          estimate={id === "done" ? 88 : 168}
+          contained={id === "done"}
+          enabled={virtualize && id === "done" && !collapsed && visibleCards.length > 18}
         >
-          {visibleCards.map((card) => (
-            <KanbanCard
-              key={card.id}
-              card={card}
-              columnId={id}
-              compact={id === "done"}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              onToggleFlag={onToggleFlag}
-              onSendTo={onSendTo}
-              onEditLink={onEditLink}
-              onOpenDetails={onOpenDetails}
-              onPrAlert={onPrAlert}
-            />
-          ))}
-        </SortableContext>
+          {({ start, end }) => {
+            const slice = visibleCards.slice(start, end);
+            const sliceIds = sortableIds.slice(start, end);
+            return (
+              <SortableContext
+                items={sliceIds}
+                strategy={verticalListSortingStrategy}
+              >
+                {slice.map((card) => (
+                  <KanbanCard
+                    key={card.id}
+                    card={card}
+                    columnId={id}
+                    compact={id === "done"}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onToggleFlag={onToggleFlag}
+                    onSendTo={onSendTo}
+                    onEditLink={onEditLink}
+                    onOpenDetails={onOpenDetails}
+                    onPrAlert={onPrAlert}
+                    focused={focusedCardId === card.id}
+                  />
+                ))}
+              </SortableContext>
+            );
+          }}
+        </VirtualCardList>
         {hiddenCount > 0 ? (
           <button
             type="button"
@@ -222,4 +243,4 @@ export function KanbanColumn({
       </div>
     </section>
   );
-}
+});

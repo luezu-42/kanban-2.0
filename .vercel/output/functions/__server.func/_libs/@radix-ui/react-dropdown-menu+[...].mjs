@@ -1,11 +1,10 @@
 import { o as __toESM } from "../../_runtime.mjs";
 import { i as require_react } from "../dnd-kit__accessibility+react.mjs";
-import { C as useCallbackRef, D as useId, E as useControllableState, M as useComposedRefs, N as require_jsx_runtime, O as useLayoutEffect2, S as DismissableLayer, T as dispatchDiscreteCustomEvent, _ as ReactRemoveScroll, b as Portal$1, g as hideOthers, j as createSlot, k as createContextScope, v as useFocusGuards, w as Primitive, x as FocusScope, y as Presence } from "./react-alert-dialog+[...].mjs";
+import { a as flip, c as offset, d as useFloating, f as autoUpdate, g as require_jsx_runtime, i as arrow, l as shift, m as ReactRemoveScroll, o as hide, p as hideOthers, s as limitShift, u as size } from "../@excalidraw/excalidraw+[...].mjs";
+import { C as dispatchDiscreteCustomEvent, D as createContextScope, E as useLayoutEffect2, S as Primitive, T as useId, _ as Presence, b as DismissableLayer, g as useFocusGuards, j as useComposedRefs, k as createSlot, v as Portal$1, w as useControllableState, x as useCallbackRef, y as FocusScope } from "./react-alert-dialog+[...].mjs";
 import { t as composeEventHandlers } from "../radix-ui__primitive.mjs";
 import { t as createCollection } from "../radix-ui__react-collection.mjs";
 import { t as useDirection } from "../radix-ui__react-direction.mjs";
-import { n as autoUpdate } from "../@floating-ui/dom+[...].mjs";
-import { a as offset, c as useFloating, i as limitShift, n as flip, o as shift, r as hide, s as size, t as arrow } from "../floating-ui__react-dom.mjs";
 //#region node_modules/@radix-ui/react-use-size/dist/index.mjs
 var import_react = /* @__PURE__ */ __toESM(require_react(), 1);
 var __defProp$5 = Object.defineProperty;

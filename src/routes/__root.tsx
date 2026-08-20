@@ -19,7 +19,7 @@ const ogImage = host
   ? `https://og.grok.me/v1/card.png?host=${encodeURIComponent(host)}&title=${encodeURIComponent(APP_NAME)}`
   : undefined;
 
-const THEME_BOOT = `(function(){try{var r=localStorage.getItem("ledger-profile-v1");var t=r?JSON.parse(r).state.appearance:"dark";if(t!=="light"&&t!=="soft")t="dark";document.documentElement.setAttribute("data-theme",t);document.documentElement.style.colorScheme=t==="dark"?"dark":"light";}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();`;
+const THEME_BOOT = `(function(){try{window.EXCALIDRAW_ASSET_PATH="/excalidraw/";var r=localStorage.getItem("ledger-profile-v1");var t=r?JSON.parse(r).state.appearance:"dark";if(t!=="light"&&t!=="soft")t="dark";document.documentElement.setAttribute("data-theme",t);document.documentElement.style.colorScheme=t==="dark"?"dark":"light";}catch(e){window.EXCALIDRAW_ASSET_PATH="/excalidraw/";document.documentElement.setAttribute("data-theme","dark");}})();`;
 
 export const Route = createRootRoute({
   head: () => ({
@@ -44,16 +44,6 @@ export const Route = createRootRoute({
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      {
-        rel: "preconnect",
-        href: "https://fonts.gstatic.com",
-        crossOrigin: "anonymous",
-      },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap",
-      },
     ],
   }),
   component: Root,

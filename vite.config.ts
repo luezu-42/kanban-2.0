@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -6,6 +9,31 @@ import tailwindcss from "@tailwindcss/vite";
 import { nitro } from "nitro/vite";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
+
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
+
+function excalidrawFontsPlugin(): Plugin {
+  const fontsSrc = path.join(
+    rootDir,
+    "node_modules/@excalidraw/excalidraw/dist/prod/fonts",
+  );
+  const fontsDest = path.join(rootDir, "public/excalidraw/fonts");
+  return {
+    name: "excalidraw-fonts",
+    buildStart() {
+      if (!fs.existsSync(fontsSrc)) return;
+      const stamp = path.join(fontsDest, ".stamp");
+      const sample = path.join(fontsSrc, "Virgil", "Virgil-Regular.woff2");
+      const mark = fs.existsSync(sample)
+        ? String(fs.statSync(sample).mtimeMs)
+        : "1";
+      if (fs.existsSync(stamp) && fs.readFileSync(stamp, "utf8") === mark) return;
+      fs.mkdirSync(fontsDest, { recursive: true });
+      fs.cpSync(fontsSrc, fontsDest, { recursive: true });
+      fs.writeFileSync(stamp, mark);
+    },
+  };
+}
 
 /**
  * Finish PGLite bootstrap during dev-server setup (before traffic). Vite awaits
@@ -140,10 +168,29 @@ export default defineConfig(({ command }) => {
       strictPort: true,
     },
     resolve: { tsconfigPaths: true },
+    define: {
+      "process.env.IS_PREACT": JSON.stringify("false"),
+    },
+    optimizeDeps: {
+      include: ["@excalidraw/excalidraw"],
+    },
     ssr: {
-      external: ["@libsql/client"],
+      external: ["@libsql/client", "@excalidraw/excalidraw"],
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules/@excalidraw")) return "excalidraw";
+            if (id.includes("node_modules/mermaid")) return "mermaid";
+            if (id.includes("node_modules/@dnd-kit")) return "dnd";
+            if (id.includes("node_modules/date-fns")) return "date-fns";
+          },
+        },
+      },
     },
     plugins: [
+      excalidrawFontsPlugin(),
       pgliteBootstrapPlugin(),
       // Before tanstackStart so /auth/popup never falls through to the SPA.
       authPopupPlugin(),

@@ -1,4 +1,4 @@
-import { Ban, TriangleAlert } from "lucide-react";
+import { Ban, Hourglass, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { BlockPicker } from "@/components/block-picker";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Card, ColumnId } from "@/lib/kanban";
-import { COLUMNS } from "@/lib/kanban";
+import { COLUMNS, WAITING_NOTE_MAX } from "@/lib/kanban";
 import { cn } from "@/lib/utils";
 
 export type CardFormState =
@@ -27,6 +27,8 @@ export type CardFormValues = {
   blocked: boolean;
   urgent: boolean;
   blockedBy: string[];
+  waiting: boolean;
+  waitingNote: string;
 };
 
 type Candidate = Card & { columnId: ColumnId };
@@ -51,6 +53,8 @@ export function CardFormDialog({
   const [blocked, setBlocked] = useState(false);
   const [urgent, setUrgent] = useState(false);
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
+  const [waiting, setWaiting] = useState(false);
+  const [waitingNote, setWaitingNote] = useState("");
 
   useEffect(() => {
     if (!open || !state) return;
@@ -60,12 +64,16 @@ export function CardFormDialog({
       setBlocked(state.card.blocked);
       setUrgent(state.card.urgent);
       setBlockedBy(state.card.blockedBy);
+      setWaiting(state.card.waiting);
+      setWaitingNote(state.card.waitingNote);
     } else {
       setTitle("");
       setDescription("");
       setBlocked(false);
       setUrgent(false);
       setBlockedBy([]);
+      setWaiting(false);
+      setWaitingNote("");
     }
   }, [open, state]);
 
@@ -86,6 +94,8 @@ export function CardFormDialog({
       blocked,
       urgent,
       blockedBy: blocked ? blockedBy : [],
+      waiting,
+      waitingNote: waiting ? waitingNote.trim() : "",
     });
     onOpenChange(false);
   }
@@ -135,7 +145,7 @@ export function CardFormDialog({
             </div>
             <fieldset className="grid gap-2">
               <legend className="text-sm font-medium text-fg">Flags</legend>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <FlagToggle
                   pressed={urgent}
                   onPressedChange={setUrgent}
@@ -153,8 +163,30 @@ export function CardFormDialog({
                   label="Blocked"
                   tone="blocked"
                 />
+                <FlagToggle
+                  pressed={waiting}
+                  onPressedChange={(next) => {
+                    setWaiting(next);
+                    if (!next) setWaitingNote("");
+                  }}
+                  icon={Hourglass}
+                  label="Waiting"
+                  tone="waiting"
+                />
               </div>
             </fieldset>
+            {waiting ? (
+              <div className="grid gap-2">
+                <Label htmlFor="card-waiting-note">Waiting on</Label>
+                <Input
+                  id="card-waiting-note"
+                  value={waitingNote}
+                  onChange={(event) => setWaitingNote(event.target.value)}
+                  placeholder="Design review, legal, a reply…"
+                  maxLength={WAITING_NOTE_MAX}
+                />
+              </div>
+            ) : null}
             {blocked ? (
               <div className="grid gap-2">
                 <Label>Blocked by</Label>
@@ -196,7 +228,7 @@ function FlagToggle({
   onPressedChange: (next: boolean) => void;
   icon: typeof TriangleAlert;
   label: string;
-  tone: "urgent" | "blocked";
+  tone: "urgent" | "blocked" | "waiting";
 }) {
   return (
     <button
@@ -207,6 +239,7 @@ function FlagToggle({
         "inline-flex h-11 items-center justify-center gap-2 rounded-md text-sm font-medium shadow-border transition-[color,background-color,box-shadow] duration-150",
         pressed && tone === "urgent" && "bg-urgent/15 text-urgent shadow-none",
         pressed && tone === "blocked" && "bg-danger/15 text-danger shadow-none",
+        pressed && tone === "waiting" && "bg-waiting/15 text-waiting shadow-none",
         !pressed && "bg-bg text-muted hover:text-fg",
       )}
     >

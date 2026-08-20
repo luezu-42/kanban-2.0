@@ -5,13 +5,14 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markd
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { useAssetGeneration, resolveAsset } from "@/lib/asset-cache";
 import { expandMarkdownImages, resolveImageUrl } from "@/lib/markdown-image";
 
 const schema = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
-    src: [...(defaultSchema.protocols?.src ?? ["http", "https"]), "data", "ledger"],
+    src: [...(defaultSchema.protocols?.src ?? ["http", "https"]), "data", "blob", "ledger"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -22,9 +23,10 @@ const schema = {
 };
 
 function urlTransform(url: string, images: Record<string, string>) {
-  const resolved = resolveImageUrl(url, images);
-  if (/^data:image\/[a-zA-Z0-9.+-]+;/.test(resolved)) return resolved;
-  if (/^data:image\/[a-zA-Z0-9.+-]+;/.test(url)) return url;
+  const resolved = resolveAsset(resolveImageUrl(url, images));
+  if (resolved.startsWith("blob:")) return resolved;
+  if (/^data:image\/(png|jpe?g|webp|gif);/i.test(resolved)) return resolved;
+  if (/^data:image\/(png|jpe?g|webp|gif);/i.test(url)) return url;
   return defaultUrlTransform(url);
 }
 
@@ -99,6 +101,7 @@ export function MarkdownPreview({
   images?: Record<string, string>;
   className?: string;
 }) {
+  useAssetGeneration();
   if (!markdown.trim()) {
     return (
       <p className={cn("text-sm text-subtle", className)}>

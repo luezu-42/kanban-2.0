@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 import { BoardSync } from "@/components/board-sync";
 import { KanbanBoard } from "@/components/kanban-board";
-import { PlanningPoker } from "@/components/planning-poker";
 import { PokerLaunch } from "@/components/poker-launch";
 import { SiteHeader } from "@/components/site-header";
 import { SyncBanner } from "@/components/sync-banner";
@@ -14,6 +14,10 @@ import { useProfileStore } from "@/lib/profile";
 import { getUnlockToken } from "@/lib/unlock";
 import { checkUnlock, loadProfile } from "@/lib/workspace";
 import { ReviewLiveProvider } from "@/lib/review-live";
+
+const PlanningPoker = lazy(() =>
+  import("@/components/planning-poker").then((mod) => ({ default: mod.PlanningPoker })),
+);
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -27,6 +31,7 @@ function Home() {
   const [bootError, setBootError] = useState("");
   const [retry, setRetry] = useState(0);
   const [poker, setPoker] = useState<PokerSession | null>(null);
+  const [canvasOpen, setCanvasOpen] = useState(false);
   const name = useProfileStore((state) => state.name);
   const setName = useProfileStore((state) => state.setName);
 
@@ -117,25 +122,43 @@ function Home() {
   }
 
   return (
-    <main className="min-h-dvh bg-bg text-fg">
+    <main
+      className={cn(
+        "min-h-dvh bg-bg text-fg",
+        (poker || canvasOpen) && "lg:h-dvh lg:overflow-hidden",
+      )}
+    >
       <ReviewLiveProvider>
       <BoardSync />
-      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-8 px-4 py-8 sm:px-6 sm:py-10">
+      <div className="mx-auto flex h-full min-h-0 w-full flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6 lg:gap-4 lg:px-8 lg:py-5 wide:px-10 qhd:px-14">
         <SiteHeader />
         <SyncBanner />
         {poker ? (
-          <PlanningPoker
-            name={name}
-            initialCards={poker.cards}
-            onExit={exitPoker}
-          />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <Suspense fallback={<div className="h-80 animate-pulse rounded-xl bg-bg-elevated" />}>
+              <PlanningPoker
+                name={name}
+                initialCards={poker.cards}
+                onExit={exitPoker}
+              />
+            </Suspense>
+          </div>
         ) : (
           <>
-            <KanbanBoard />
-            <PokerLaunch onStart={startPoker} />
-            <p className="text-center text-xs text-subtle">
-              Saved to the shared workspace.
-            </p>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <KanbanBoard
+                canvasOpen={canvasOpen}
+                onCanvasOpenChange={setCanvasOpen}
+              />
+            </div>
+            {canvasOpen ? null : (
+              <>
+                <PokerLaunch onStart={startPoker} />
+                <p className="shrink-0 text-center text-xs text-subtle lg:hidden">
+                  Saved to the shared workspace.
+                </p>
+              </>
+            )}
           </>
         )}
       </div>

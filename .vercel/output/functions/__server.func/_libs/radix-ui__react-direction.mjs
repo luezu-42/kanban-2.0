@@ -1,6 +1,6 @@
 import { o as __toESM } from "../_runtime.mjs";
 import { i as require_react } from "./dnd-kit__accessibility+react.mjs";
-import { N as require_jsx_runtime } from "./@radix-ui/react-alert-dialog+[...].mjs";
+import { g as require_jsx_runtime } from "./@excalidraw/excalidraw+[...].mjs";
 //#region node_modules/@radix-ui/react-direction/dist/index.mjs
 var import_react = /* @__PURE__ */ __toESM(require_react(), 1);
 require_jsx_runtime();

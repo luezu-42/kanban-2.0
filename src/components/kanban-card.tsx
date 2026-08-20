@@ -5,12 +5,14 @@ import {
   Ban,
   ChevronLeft,
   ChevronRight,
+  Hourglass,
   MoreHorizontal,
   Pencil,
   Trash2,
   TriangleAlert,
   UserRound,
 } from "lucide-react";
+import { memo } from "react";
 import { toast } from "sonner";
 import { CardLinkButtons } from "@/components/card-link-buttons";
 import { Button } from "@/components/ui/button";
@@ -30,7 +32,9 @@ import {
 } from "@/lib/kanban";
 import { useProfileStore } from "@/lib/profile";
 import { cn } from "@/lib/utils";
+import { WaitingBanner } from "@/components/waiting-banner";
 import { getUnlockToken } from "@/lib/unlock";
+import { rememberServerVersion } from "@/lib/workspace-version";
 import { claimAssignee } from "@/lib/workspace";
 
 type KanbanCardProps = {
@@ -39,11 +43,12 @@ type KanbanCardProps = {
   compact?: boolean;
   onEdit: (card: Card) => void;
   onDelete: (card: Card) => void;
-  onToggleFlag: (card: Card, flag: "blocked" | "urgent") => void;
+  onToggleFlag: (card: Card, flag: "blocked" | "urgent" | "waiting") => void;
   onSendTo: (card: Card, columnId: ColumnId) => void;
   onEditLink: (card: Card, kind: CardLinkKind) => void;
   onOpenDetails: (card: Card) => void;
   onPrAlert: (card: Card) => void;
+  focused?: boolean;
 };
 
 type CardFaceProps = {
@@ -54,7 +59,7 @@ type CardFaceProps = {
   compact?: boolean;
   onEdit?: (card: Card) => void;
   onDelete?: (card: Card) => void;
-  onToggleFlag?: (card: Card, flag: "blocked" | "urgent") => void;
+  onToggleFlag?: (card: Card, flag: "blocked" | "urgent" | "waiting") => void;
   onSendTo?: (card: Card, columnId: ColumnId) => void;
   onEditLink?: (card: Card, kind: CardLinkKind) => void;
   onOpenDetails?: (card: Card) => void;
@@ -62,7 +67,7 @@ type CardFaceProps = {
 };
 
 export function CardFlags({ card }: { card: Card }) {
-  if (!card.urgent && !card.blocked) return null;
+  if (!card.urgent && !card.blocked && !card.waiting) return null;
   return (
     <ul className="mt-3 flex flex-wrap gap-1.5">
       {card.urgent ? (
@@ -77,6 +82,12 @@ export function CardFlags({ card }: { card: Card }) {
           {card.blockedBy.length
             ? `Blocked · ${card.blockedBy.length}`
             : "Blocked"}
+        </li>
+      ) : null}
+      {card.waiting ? (
+        <li className="inline-flex items-center gap-1 rounded-full bg-waiting/15 px-2 py-0.5 text-xs font-medium text-waiting">
+          <Hourglass className="size-3" aria-hidden="true" />
+          Waiting
         </li>
       ) : null}
     </ul>
@@ -117,6 +128,7 @@ export function CardFace({
       });
       if (result.ok) {
         applyCard(result.card);
+        if (result.version) rememberServerVersion(result.version);
         toast.success(`Assigned to ${profileName}`);
         return;
       }
@@ -318,6 +330,13 @@ export function CardFace({
                 <Ban className="size-4" />
                 {card.blocked ? "Clear blocked" : "Mark blocked"}
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => onToggleFlag?.(card, "waiting")}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <Hourglass className="size-4" />
+                {card.waiting ? "Edit waiting" : "Mark waiting"}
+              </DropdownMenuItem>
               {card.assignee ? (
                 <DropdownMenuItem
                   onSelect={handleUnassign}
@@ -344,6 +363,9 @@ export function CardFace({
         <p className="mt-2 text-sm leading-relaxed wrap-break-word text-muted [overflow-wrap:anywhere]">{card.description}</p>
       ) : null}
       <CardFlags card={card} />
+      {card.waiting && card.waitingNote ? (
+        <WaitingBanner text={card.waitingNote} />
+      ) : null}
       {card.assignee ? (
         <p className="mt-3 flex items-center gap-2 text-xs text-muted">
           <span
@@ -418,7 +440,7 @@ export function CardFace({
   );
 }
 
-export function KanbanCard({
+export const KanbanCard = memo(function KanbanCard({
   card,
   columnId,
   compact,
@@ -429,6 +451,7 @@ export function KanbanCard({
   onEditLink,
   onOpenDetails,
   onPrAlert,
+  focused = false,
 }: KanbanCardProps) {
   const {
     attributes,
@@ -452,7 +475,11 @@ export function KanbanCard({
       {...attributes}
       {...listeners}
       data-card-id={card.id}
-      className="cursor-grab touch-none active:cursor-grabbing"
+      data-focused={focused ? "true" : undefined}
+      className={cn(
+        "cursor-grab touch-none active:cursor-grabbing rounded-lg",
+        focused && "ring-2 ring-ring/80 ring-offset-2 ring-offset-bg",
+      )}
     >
       <CardFace
         card={card}
@@ -469,4 +496,4 @@ export function KanbanCard({
       />
     </div>
   );
-}
+});

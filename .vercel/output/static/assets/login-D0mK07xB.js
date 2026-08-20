@@ -1,0 +1,1 @@
+import{Qn as e}from"./excalidraw-De39uyBA.js";import{w as t}from"./index-BEQHjTwQ.js";var n=e();function r(){return(0,n.jsx)(t,{to:`/`})}export{r as component};

@@ -4358,15 +4358,11 @@ var require_lib = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 }));
 //#endregion
 //#region node_modules/pg/esm/index.mjs
-var esm_exports = /* @__PURE__ */ __exportAll({
-	Pool: () => Pool,
-	types: () => types
-});
 var import_lib = /* @__PURE__ */ __toESM(require_lib(), 1);
 import_lib.default.Client;
 var Pool = import_lib.default.Pool;
 import_lib.default.Connection;
-var types = import_lib.default.types;
+import_lib.default.types;
 import_lib.default.Query;
 import_lib.default.DatabaseError;
 import_lib.default.escapeIdentifier;
@@ -4375,4 +4371,4 @@ import_lib.default.Result;
 import_lib.default.TypeOverrides;
 import_lib.default.defaults;
 //#endregion
-export { esm_exports as n, Pool as t };
+export { Pool as t };

@@ -8,6 +8,7 @@ export type WorkspaceSyncPayload = {
   token: string;
   themes: unknown;
   activeThemeId: string;
+  version?: number;
   at: number;
 };
 
@@ -108,6 +109,7 @@ export async function replayWorkspaceSync(payload: WorkspaceSyncPayload) {
       token: payload.token,
       themes: payload.themes,
       activeThemeId: payload.activeThemeId,
+      version: payload.version ?? 0,
     }),
   });
   if (!response.ok) throw new Error("workspace sync failed");
@@ -135,7 +137,10 @@ export function subscribeSyncMessages(onFlush: () => void, onPull: () => void) {
 export async function registerLedgerWorker() {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
   try {
-    await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    await navigator.serviceWorker.register("/sw.js", {
+      scope: "/",
+      updateViaCache: "none",
+    });
     await registerPeriodicSync();
   } catch {
     // Preview without SW support should keep working.

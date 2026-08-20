@@ -1,6 +1,7 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { applyBoardDelta, type BoardDelta } from "@/lib/board-delta";
 import {
   type WhiteboardDoc,
   emptyWhiteboard,
@@ -8,6 +9,17 @@ import {
   stripWhiteboardDataUrls,
   whiteboardSignature,
 } from "@/lib/whiteboard";
+
+export const boardHistoryGate = { skip: false };
+
+function skippingHistory<T>(fn: () => T): T {
+  boardHistoryGate.skip = true;
+  try {
+    return fn();
+  } finally {
+    boardHistoryGate.skip = false;
+  }
+}
 
 export const COLUMN_IDS = [
   "backlog",
@@ -77,6 +89,8 @@ export const COLUMNS: {
   },
 ];
 
+export const WAITING_NOTE_MAX = 160;
+
 export type Card = {
   id: string;
   title: string;
@@ -84,6 +98,8 @@ export type Card = {
   createdAt: number;
   blocked: boolean;
   urgent: boolean;
+  waiting: boolean;
+  waitingNote: string;
   jiraUrl: string;
   prUrl: string;
   details: string;
@@ -119,7 +135,13 @@ type BoardStore = {
     columnId: ColumnId,
     title: string,
     description: string,
-    flags?: { blocked?: boolean; urgent?: boolean; blockedBy?: string[] },
+    flags?: {
+      blocked?: boolean;
+      urgent?: boolean;
+      blockedBy?: string[];
+      waiting?: boolean;
+      waitingNote?: string;
+    },
   ) => string;
   updateCard: (
     id: string,
@@ -129,10 +151,13 @@ type BoardStore = {
       blocked: boolean;
       urgent: boolean;
       blockedBy?: string[];
+      waiting?: boolean;
+      waitingNote?: string;
     },
   ) => void;
   toggleCardFlag: (id: string, flag: "blocked" | "urgent") => void;
   setCardBlock: (id: string, blocked: boolean, blockedBy?: string[]) => void;
+  setCardWaiting: (id: string, waiting: boolean, waitingNote?: string) => void;
   setCardLink: (id: string, kind: CardLinkKind, url: string) => void;
   setCardDetails: (
     id: string,
@@ -155,6 +180,7 @@ type BoardStore = {
   setThemeNotice: (notice: string) => void;
   setThemeWhiteboard: (whiteboard: WhiteboardDoc) => void;
   replaceBoard: (themes: Theme[], activeThemeId: string) => void;
+  applyDelta: (delta: BoardDelta) => void;
   applyCard: (card: Card) => void;
 };
 
@@ -391,12 +417,25 @@ export function collectPlanningCards(themes: Theme[]) {
   return cards;
 }
 
+function sanitizeWaitingNote(waiting: boolean, raw: unknown) {
+  if (!waiting) return "";
+  if (typeof raw !== "string") return "";
+  return raw.trim().slice(0, WAITING_NOTE_MAX);
+}
+
 function card(
   title: string,
   description: string,
   createdAt: number,
-  flags: { blocked?: boolean; urgent?: boolean; blockedBy?: string[] } = {},
+  flags: {
+    blocked?: boolean;
+    urgent?: boolean;
+    blockedBy?: string[];
+    waiting?: boolean;
+    waitingNote?: string;
+  } = {},
 ): Card {
+  const waiting = Boolean(flags.waiting);
   return {
     id: crypto.randomUUID(),
     title,
@@ -404,6 +443,8 @@ function card(
     createdAt,
     blocked: Boolean(flags.blocked),
     urgent: Boolean(flags.urgent),
+    waiting,
+    waitingNote: sanitizeWaitingNote(waiting, flags.waitingNote),
     jiraUrl: "",
     prUrl: "",
     details: "",
@@ -525,6 +566,8 @@ export function boardSignature(themes: Theme[], activeThemeId: string) {
         card.description,
         card.blocked,
         card.urgent,
+        card.waiting,
+        card.waitingNote,
         card.assignee,
         card.duration,
         card.prAlert,
@@ -562,6 +605,8 @@ function mergeReviewCard(existing: Card | undefined, incoming: Card): Card {
     prAlert: incoming.prAlert,
     blocked: incoming.blocked,
     urgent: incoming.urgent,
+    waiting: incoming.waiting,
+    waitingNote: incoming.waitingNote,
     jiraUrl: incoming.jiraUrl || existing.jiraUrl,
     prUrl: incoming.prUrl || existing.prUrl,
     details:
@@ -586,8 +631,10 @@ export function normalizeCard(raw: unknown): Card | null {
     createdAt: typeof value.createdAt === "number" ? value.createdAt : Date.now(),
     blocked: Boolean(value.blocked),
     urgent: Boolean(value.urgent),
-    jiraUrl: typeof value.jiraUrl === "string" ? value.jiraUrl : "",
-    prUrl: typeof value.prUrl === "string" ? value.prUrl : "",
+    waiting: Boolean(value.waiting),
+    waitingNote: sanitizeWaitingNote(Boolean(value.waiting), value.waitingNote),
+    jiraUrl: storedExternalUrl(value.jiraUrl),
+    prUrl: storedExternalUrl(value.prUrl),
     details: lifted.details,
     images: lifted.images,
     assignee: typeof value.assignee === "string" ? value.assignee : "",
@@ -602,11 +649,17 @@ export function normalizeCard(raw: unknown): Card | null {
   };
 }
 
+function storedExternalUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  return parseExternalUrl(value) ?? "";
+}
+
 function normalizeImages(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const next: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "string" && value.startsWith("data:image/")) next[key] = value;
+    if (typeof value !== "string") continue;
+    if (value.startsWith("data:image/") || value.startsWith("asset:")) next[key] = value;
   }
   return next;
 }
@@ -709,11 +762,13 @@ export const useBoardStore = create<BoardStore>()(
       ...seedThemes(),
 
       setActiveTheme: (id) => {
-        set((state) =>
-          state.themes.some((theme) => theme.id === id)
-            ? { activeThemeId: id }
-            : state,
-        );
+        skippingHistory(() => {
+          set((state) =>
+            state.themes.some((theme) => theme.id === id)
+              ? { activeThemeId: id }
+              : state,
+          );
+        });
       },
 
       addTheme: (name) => {
@@ -785,6 +840,11 @@ export const useBoardStore = create<BoardStore>()(
                   description: patch.description.trim(),
                   blocked: patch.blocked,
                   urgent: patch.urgent,
+                  waiting: Boolean(patch.waiting),
+                  waitingNote: sanitizeWaitingNote(
+                    Boolean(patch.waiting),
+                    patch.waitingNote ?? existing.waitingNote,
+                  ),
                   blockedBy: sanitizeBlockedBy(
                     theme.cards,
                     id,
@@ -841,6 +901,30 @@ export const useBoardStore = create<BoardStore>()(
                   ...existing,
                   blocked,
                   blockedBy: sanitizeBlockedBy(theme.cards, id, blocked, blockedBy),
+                },
+              },
+            };
+          }),
+        );
+      },
+
+      setCardWaiting: (id, waiting, waitingNote) => {
+        set((state) =>
+          withActive(state, (theme) => {
+            const existing = theme.cards[id];
+            if (!existing) return theme;
+            const note = sanitizeWaitingNote(waiting, waitingNote);
+            if (existing.waiting === waiting && existing.waitingNote === note) {
+              return theme;
+            }
+            return {
+              ...theme,
+              cards: {
+                ...theme.cards,
+                [id]: {
+                  ...existing,
+                  waiting,
+                  waitingNote: note,
                 },
               },
             };
@@ -1066,6 +1150,7 @@ export const useBoardStore = create<BoardStore>()(
       ingestReviewCard: (incoming) => {
         const card = normalizeCard(incoming);
         if (!card) return;
+        skippingHistory(() => {
         set((state) => {
           let found = false;
           let changed = false;
@@ -1119,9 +1204,11 @@ export const useBoardStore = create<BoardStore>()(
             themes: themes.map((theme) => (theme.id === nextActive.id ? nextActive : theme)),
           };
         });
+        });
       },
 
       applyReviewLeave: (cardId, dest) => {
+        skippingHistory(() => {
         set((state) => ({
           themes: state.themes.map((theme) => {
             if (!theme.cards[cardId]) return theme;
@@ -1156,10 +1243,13 @@ export const useBoardStore = create<BoardStore>()(
             );
           }),
         }));
+        });
       },
 
       applyUrgencySort: () => {
-        set((state) => withActive(state, sortThemeByUrgency));
+        skippingHistory(() => {
+          set((state) => withActive(state, sortThemeByUrgency));
+        });
       },
 
       setThemeNotice: (notice) => {
@@ -1185,12 +1275,26 @@ export const useBoardStore = create<BoardStore>()(
       replaceBoard: (themes, activeThemeId) => {
         const parsed = parseBoardPayload({ themes, activeThemeId });
         if (!parsed) return;
-        set((state) =>
-          boardSignature(state.themes, state.activeThemeId) ===
-          boardSignature(parsed.themes, parsed.activeThemeId)
-            ? state
-            : parsed,
-        );
+        skippingHistory(() => {
+          set((state) =>
+            boardSignature(state.themes, state.activeThemeId) ===
+            boardSignature(parsed.themes, parsed.activeThemeId)
+              ? state
+              : parsed,
+          );
+        });
+      },
+
+      applyDelta: (delta) => {
+        skippingHistory(() => {
+          set((state) => {
+            const next = applyBoardDelta(state.themes, state.activeThemeId, delta);
+            return boardSignature(state.themes, state.activeThemeId) ===
+              boardSignature(next.themes, next.activeThemeId)
+              ? state
+              : next;
+          });
+        });
       },
 
       applyCard: (incoming) => {
@@ -1215,6 +1319,20 @@ export const useBoardStore = create<BoardStore>()(
         themes: state.themes.map((theme) => ({
           ...theme,
           whiteboard: stripWhiteboardDataUrls(theme.whiteboard ?? emptyWhiteboard()),
+          cards: Object.fromEntries(
+            Object.values(theme.cards).map((card) => [
+              card.id,
+              {
+                ...card,
+                images: Object.fromEntries(
+                  Object.entries(card.images).map(([id, src]) => [
+                    id,
+                    src.startsWith("data:") ? `asset:${id}` : src,
+                  ]),
+                ),
+              },
+            ]),
+          ),
         })),
         activeThemeId: state.activeThemeId,
       }),
