@@ -14,10 +14,11 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** Excalidraw (and mermaid-to-excalidraw) touch `document` at import time.
  *  Keep them out of the Nitro/SSR graph so `/` does not 500. */
-function stubExcalidrawOnServer(): Plugin {
-  const stubId = "\0excalidraw-ssr-stub";
+function stubBrowserOnlyOnServer(): Plugin {
+  const excalidrawStub = "\0excalidraw-ssr-stub";
+  const mermaidStub = "\0mermaid-ssr-stub";
   return {
-    name: "stub-excalidraw-ssr",
+    name: "stub-browser-only-ssr",
     enforce: "pre",
     resolveId(id) {
       if (this.environment?.name === "client") return null;
@@ -27,18 +28,27 @@ function stubExcalidrawOnServer(): Plugin {
         id === "@excalidraw/mermaid-to-excalidraw" ||
         id.startsWith("@excalidraw/mermaid-to-excalidraw/")
       ) {
-        return stubId;
+        return excalidrawStub;
       }
+      if (id === "mermaid" || id.startsWith("mermaid/")) return mermaidStub;
       return null;
     },
     load(id) {
-      if (id !== stubId) return null;
-      return `
-        export const Excalidraw = () => null;
-        export const restore = () => ({ elements: [], appState: {}, files: {} });
-        export const convertToExcalidrawElements = () => [];
-        export default { Excalidraw, restore, convertToExcalidrawElements };
-      `;
+      if (id === excalidrawStub) {
+        return `
+          export const Excalidraw = () => null;
+          export const restore = () => ({ elements: [], appState: {}, files: {} });
+          export const convertToExcalidrawElements = () => [];
+          export default { Excalidraw, restore, convertToExcalidrawElements };
+        `;
+      }
+      if (id === mermaidStub) {
+        return `
+          const mermaid = { initialize() {}, render: async () => ({ svg: "" }) };
+          export default mermaid;
+        `;
+      }
+      return null;
     },
   };
 }
@@ -221,7 +231,7 @@ export default defineConfig(({ command }) => {
       },
     },
     plugins: [
-      stubExcalidrawOnServer(),
+      stubBrowserOnlyOnServer(),
       excalidrawFontsPlugin(),
       pgliteBootstrapPlugin(),
       // Before tanstackStart so /auth/popup never falls through to the SPA.
