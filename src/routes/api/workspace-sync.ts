@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { parseBoardPayload } from "@/lib/kanban";
-import { commitWorkspacePayload } from "@/lib/workspace.server";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -35,6 +34,7 @@ async function handlePost({ request }: { request: Request }) {
   if (!parsed) return json({ ok: false, error: "invalid board" }, 400);
   const version = typeof value.version === "number" && Number.isFinite(value.version) ? value.version : 0;
   try {
+    const { commitWorkspacePayload } = await import("@/lib/workspace.server");
     const result = await commitWorkspacePayload(
       parsed.themes,
       parsed.activeThemeId,

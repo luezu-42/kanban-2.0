@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ASSET_ID, readAssetData } from "@/lib/board-rows.server";
+
+const ASSET_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
 function unauthorized() {
   return new Response("Unauthorized", {
@@ -33,6 +34,7 @@ async function handleGet({
 
   const id = params.id.trim();
   if (!ASSET_ID.test(id)) return notFound();
+  const { readAssetData } = await import("@/lib/board-rows.server");
   const data = await readAssetData(id);
   if (!data || !data.startsWith("data:image/")) return notFound();
 

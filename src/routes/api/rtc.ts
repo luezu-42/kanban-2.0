@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { handleSignaling } from "@/lib/multiplayer/signaling.server";
 
-const handle = ({ request }: { request: Request }) => handleSignaling(request);
+async function handle({ request }: { request: Request }) {
+  const { handleSignaling } = await import("@/lib/multiplayer/signaling.server");
+  return handleSignaling(request);
+}
 
 export const Route = createFileRoute("/api/rtc")({
   server: { handlers: { GET: handle, POST: handle } },

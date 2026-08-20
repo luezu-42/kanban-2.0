@@ -22,6 +22,19 @@ type ProfileStore = {
   markNoticeRead: (themeId: string, notice: string) => void;
 };
 
+function ssrStorage() {
+  const map = new Map<string, string>();
+  return {
+    getItem: (name: string) => map.get(name) ?? null,
+    setItem: (name: string, value: string) => {
+      map.set(name, value);
+    },
+    removeItem: (name: string) => {
+      map.delete(name);
+    },
+  };
+}
+
 export const useProfileStore = create<ProfileStore>()(
   persist(
     (set) => ({
@@ -49,7 +62,9 @@ export const useProfileStore = create<ProfileStore>()(
     }),
     {
       name: "ledger-profile-v1",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() =>
+        typeof window === "undefined" ? ssrStorage() : localStorage,
+      ),
       skipHydration: true,
       partialize: (state) => ({
         deviceId: state.deviceId,

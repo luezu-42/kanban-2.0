@@ -1,5 +1,4 @@
 /** App data backend: Neon Postgres, Turso/libSQL, or local PGLite. */
-import type { InValue } from "@libsql/client";
 
 export type DbSource = "turso" | "neon" | "pglite";
 
@@ -93,7 +92,17 @@ function splitSqlStatements(text: string) {
     );
 }
 
-function asInArgs(params: unknown[] | undefined): InValue[] {
+type LibsqlValue =
+  | null
+  | string
+  | number
+  | boolean
+  | bigint
+  | Date
+  | Uint8Array
+  | ArrayBuffer;
+
+function asInArgs(params: unknown[] | undefined): LibsqlValue[] {
   if (!params?.length) return [];
   return params.map((value) => {
     if (value === undefined) return null;
@@ -326,6 +335,9 @@ export function getSql(): Promise<Sql> {
 }
 
 export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite> {
+  if (onVercel) {
+    throw new Error("PGLite is not available in production");
+  }
   if (dbSource !== "pglite") {
     throw new Error("getPglite() is only available when DATABASE_URL and TURSO_DATABASE_URL are unset");
   }

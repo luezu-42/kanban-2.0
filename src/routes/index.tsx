@@ -19,7 +19,10 @@ const PlanningPoker = lazy(() =>
   import("@/components/planning-poker").then((mod) => ({ default: mod.PlanningPoker })),
 );
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({
+  ssr: false,
+  component: Home,
+});
 
 type PokerSession = {
   cards: PokerCard[];

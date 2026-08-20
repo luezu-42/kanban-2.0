@@ -175,7 +175,7 @@ export default defineConfig(({ command }) => {
       include: ["@excalidraw/excalidraw"],
     },
     ssr: {
-      external: ["@libsql/client", "@excalidraw/excalidraw"],
+      external: ["@excalidraw/excalidraw"],
     },
     build: {
       rollupOptions: {
