@@ -19,13 +19,8 @@ function stubExcalidrawOnServer(): Plugin {
   return {
     name: "stub-excalidraw-ssr",
     enforce: "pre",
-    resolveId(id, _importer, options) {
-      const envName = this.environment?.name;
-      const isServer =
-        envName === "ssr" ||
-        envName === "nitro" ||
-        Boolean(options?.ssr);
-      if (!isServer) return null;
+    resolveId(id) {
+      if (this.environment?.name === "client") return null;
       if (
         id === "@excalidraw/excalidraw" ||
         id.startsWith("@excalidraw/excalidraw/") ||
