@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { parseBoardPayload } from "@/lib/kanban";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -27,6 +26,7 @@ async function handlePost({ request }: { request: Request }) {
   if (typeof value.token !== "string" || !value.token) {
     return json({ ok: false, error: "unauthorized" }, 401);
   }
+  const { parseBoardPayload } = await import("@/lib/kanban");
   const parsed = parseBoardPayload({
     themes: value.themes,
     activeThemeId: value.activeThemeId,
